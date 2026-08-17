@@ -1,0 +1,109 @@
+:root {
+  --bg: #F1F3F1;
+  --panel: #FFFFFF;
+  --ink: #1E2422;
+  --ink-soft: #5B655F;
+  --line: #E2E5E2;
+  --meat: #A8402B;
+  --steel: #375061;
+  --success: #4C7A57;
+  --warn: #C98A2C;
+  --display: "Barlow Condensed", sans-serif;
+  --body: "Inter", sans-serif;
+  --mono: "IBM Plex Mono", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: var(--body); }
+.hidden { display: none !important; }
+button, input, select { font-family: var(--body); }
+
+/* ---------- Portão de senha ---------- */
+.portao {
+  position: fixed; inset: 0; background: var(--ink); display: flex; align-items: center; justify-content: center;
+}
+.portao-caixa { background: var(--panel); border-radius: 16px; padding: 40px; width: 340px; text-align: center; }
+.portao-marca { font-family: var(--display); font-weight: 800; letter-spacing: 3px; color: var(--meat); font-size: 13px; margin-bottom: 8px; }
+.portao-caixa h1 { font-family: var(--display); font-size: 26px; margin: 0 0 6px; }
+.portao-caixa p { color: var(--ink-soft); font-size: 14px; margin: 0 0 20px; }
+.portao-caixa input {
+  width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); font-size: 15px; margin-bottom: 12px;
+}
+.portao-caixa button {
+  width: 100%; padding: 12px; border: none; border-radius: 10px; background: var(--meat); color: white;
+  font-family: var(--display); font-size: 17px; font-weight: 700;
+}
+.portao-erro { color: var(--meat); font-size: 13px; margin-top: 10px; }
+
+/* ---------- Layout principal ---------- */
+.painel { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+.barra-lateral {
+  background: var(--ink); color: #D9E0DB; padding: 24px 20px; display: flex; flex-direction: column; gap: 20px;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.marca { font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: 1px; color: white; margin-bottom: 4px; }
+.marca span { display: block; font-size: 11px; color: #8FA396; letter-spacing: 3px; text-transform: uppercase; }
+.filtro-bloco { display: flex; flex-direction: column; gap: 8px; }
+.filtro-bloco label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #8FA396; font-weight: 700; }
+.chips-periodo { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips-periodo button {
+  flex: 1; min-width: 56px; padding: 8px 4px; border-radius: 8px; border: 1px solid #3A4640; background: transparent;
+  color: #D9E0DB; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.chips-periodo button.ativo { background: var(--meat); border-color: var(--meat); color: white; }
+.datas-custom { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8FA396; }
+.datas-custom input { flex: 1; padding: 8px; border-radius: 8px; border: 1px solid #3A4640; background: #232B27; color: #D9E0DB; font-size: 12px; }
+.filtro-bloco select {
+  padding: 9px 10px; border-radius: 8px; border: 1px solid #3A4640; background: #232B27; color: #D9E0DB; font-size: 13px;
+}
+.check-comparar { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #D9E0DB; cursor: pointer; }
+.botao-atualizar, .botao-exportar {
+  padding: 12px; border-radius: 10px; border: none; font-weight: 700; font-size: 14px; cursor: pointer;
+}
+.botao-atualizar { background: var(--meat); color: white; }
+.botao-exportar { background: transparent; border: 1px solid #3A4640; color: #D9E0DB; }
+.ultima-atualizacao { font-size: 11px; color: #6E7D74; text-align: center; }
+
+.conteudo { padding: 32px 40px; max-width: 1400px; }
+.conteudo-topo h1 { font-family: var(--display); font-size: 34px; margin: 0; }
+.resumo-periodo { color: var(--ink-soft); font-size: 14px; margin: 4px 0 24px; }
+
+/* ---------- KPIs ---------- */
+.grid-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 28px; }
+.kpi-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.kpi-card .kpi-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-soft); font-weight: 700; }
+.kpi-card .kpi-valor { font-family: var(--display); font-size: 30px; font-weight: 700; }
+.kpi-card .kpi-delta { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+.kpi-delta.positivo { color: var(--success); }
+.kpi-delta.negativo { color: var(--meat); }
+.kpi-delta.neutro { color: var(--ink-soft); }
+.kpi-card.destaque { background: var(--ink); border: none; }
+.kpi-card.destaque .kpi-label { color: #8FA396; }
+.kpi-card.destaque .kpi-valor { color: white; }
+
+/* ---------- Gráficos ---------- */
+.grid-graficos { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+.cartao { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; }
+.cartao h2 { font-family: var(--display); font-size: 19px; font-weight: 700; margin: 0 0 14px; }
+.cartao-largo { grid-column: 1 / -1; }
+
+/* ---------- Tabelas ---------- */
+.tabela-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-soft); cursor: pointer; user-select: none; }
+th:hover { color: var(--meat); }
+tbody tr:hover { background: #FAFAF9; }
+.selo { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+.selo-completa { background: #E4EFE6; color: var(--success); }
+.selo-andamento { background: #FBF1DE; color: var(--warn); }
+.selo-alerta { background: #F7E2DD; color: var(--meat); }
+
+@media (max-width: 1000px) {
+  .painel { grid-template-columns: 1fr; }
+  .barra-lateral { position: static; height: auto; flex-direction: row; flex-wrap: wrap; }
+  .grid-graficos { grid-template-columns: 1fr; }
+  .conteudo { padding: 20px; }
+}

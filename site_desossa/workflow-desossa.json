@@ -1,0 +1,143 @@
+{
+  "name": "Desossa - Espelhar no Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 2 }]
+        }
+      },
+      "id": "agendamento",
+      "name": "A cada 2 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/vw_lancamentos_detalhado",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "sheets_sincronizado_em", "value": "is.null" },
+            { "name": "order", "value": "criado_em.asc" },
+            { "name": "limit", "value": "200" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "buscar-pendentes",
+      "name": "Buscar Lançamentos Pendentes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop",
+      "name": "Um de Cada Vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "COLOQUE_O_ID_DA_SUA_PLANILHA_AQUI",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GERAL",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Codigo": "={{$json.corte_codigo}}",
+            "Produto": "={{$json.corte_nome}}",
+            "Kg": "={{$json.peso_kg}}",
+            "Pc_Custo": "={{$json.preco_kg_custo}}",
+            "Tot_Custo": "={{$json.custo_total}}",
+            "Pc_Venda": "={{$json.preco_venda_kg}}",
+            "Total_Venda": "={{$json.venda_total}}",
+            "Margem": "={{$json.margem_pct}}",
+            "Colaborador": "={{$json.colaborador_nome}}",
+            "Data": "={{$json.criado_em}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "mirror-sheets",
+      "name": "Escrever no Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 220],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURE_NA_UI_DO_N8N",
+          "name": "Google Sheets - Economize"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/lancamentos?id=eq.{{$json.id}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sheets_sincronizado_em: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "marcar-sincronizado",
+      "name": "Marcar Como Espelhado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1140, 220]
+    }
+  ],
+  "connections": {
+    "A cada 2 minutos": {
+      "main": [[{ "node": "Buscar Lançamentos Pendentes", "type": "main", "index": 0 }]]
+    },
+    "Buscar Lançamentos Pendentes": {
+      "main": [[{ "node": "Um de Cada Vez", "type": "main", "index": 0 }]]
+    },
+    "Um de Cada Vez": {
+      "main": [
+        [],
+        [{ "node": "Escrever no Google Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Escrever no Google Sheets": {
+      "main": [[{ "node": "Marcar Como Espelhado", "type": "main", "index": 0 }]]
+    },
+    "Marcar Como Espelhado": {
+      "main": [[{ "node": "Um de Cada Vez", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Painel de Acompanhamento — Desossa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="painel-gestor.css" />
+</head>
+<body>
+
+<!-- Portão de senha — mesma senha da Área do Gestor no app -->
+<div id="portao" class="portao">
+  <div class="portao-caixa">
+    <div class="portao-marca">DESOSSA · PAINEL</div>
+    <h1>Painel de Acompanhamento</h1>
+    <p>Digite a senha do gestor pra entrar.</p>
+    <input type="password" id="portao-senha" placeholder="Senha" autofocus />
+    <button id="portao-entrar">Entrar</button>
+    <p id="portao-erro" class="portao-erro hidden">Senha incorreta.</p>
+  </div>
+</div>
+
+<div id="painel" class="painel hidden">
+  <aside class="barra-lateral">
+    <div class="marca">DESOSSA<span>painel</span></div>
+
+    <div class="filtro-bloco">
+      <label>Período</label>
+      <div class="chips-periodo" id="chips-periodo">
+        <button data-dias="0">Hoje</button>
+        <button data-dias="7" class="ativo">7 dias</button>
+        <button data-dias="30">30 dias</button>
+        <button data-dias="90">90 dias</button>
+      </div>
+      <div class="datas-custom">
+        <input type="date" id="data-inicio" />
+        <span>até</span>
+        <input type="date" id="data-fim" />
+      </div>
+    </div>
+
+    <div class="filtro-bloco">
+      <label>Fornecedor</label>
+      <select id="filtro-fornecedor"><option value="">Todos</option></select>
+    </div>
+
+    <div class="filtro-bloco">
+      <label>Tipo</label>
+      <select id="filtro-tipo">
+        <option value="">Todos</option>
+        <option value="dianteiro">Dianteiro</option>
+        <option value="traseiro">Traseiro</option>
+      </select>
+    </div>
+
+    <label class="check-comparar">
+      <input type="checkbox" id="comparar-anterior" checked />
+      Comparar com período anterior
+    </label>
+
+    <button id="btn-atualizar" class="botao-atualizar">Atualizar dados</button>
+    <div id="ultima-atualizacao" class="ultima-atualizacao"></div>
+
+    <button id="btn-exportar" class="botao-exportar">⬇ Exportar CSV (peças)</button>
+  </aside>
+
+  <main class="conteudo">
+    <header class="conteudo-topo">
+      <h1>Acompanhamento da Desossa</h1>
+      <p id="resumo-periodo" class="resumo-periodo"></p>
+    </header>
+
+    <div id="grid-kpi" class="grid-kpi"></div>
+
+    <div class="grid-graficos">
+      <section class="cartao cartao-largo">
+        <h2>Evolução — Margem % e Quebra %</h2>
+        <canvas id="grafico-evolucao" height="90"></canvas>
+      </section>
+
+      <section class="cartao">
+        <h2>Dianteiro × Traseiro</h2>
+        <canvas id="grafico-dianteiro-traseiro" height="220"></canvas>
+      </section>
+
+      <section class="cartao">
+        <h2>Produtividade por colaborador (kg)</h2>
+        <canvas id="grafico-colaboradores" height="220"></canvas>
+      </section>
+
+      <section class="cartao cartao-largo">
+        <h2>Mix de cortes (peso desossado)</h2>
+        <canvas id="grafico-cortes" height="140"></canvas>
+      </section>
+    </div>
+
+    <section class="cartao">
+      <h2>Comparativo por fornecedor</h2>
+      <div class="tabela-wrap">
+        <table id="tabela-fornecedores">
+          <thead><tr><th>Fornecedor</th><th>Peças</th><th>Peso líquido</th><th>Rendimento</th><th>Quebra</th><th>Margem</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cartao">
+      <h2>Peças do período</h2>
+      <div class="tabela-wrap">
+        <table id="tabela-pecas">
+          <thead>
+            <tr>
+              <th data-ordenar="fornecedor">Fornecedor</th>
+              <th data-ordenar="tipo">Tipo</th>
+              <th data-ordenar="numero_peca">Peça</th>
+              <th data-ordenar="data_desossa">Data desossa</th>
+              <th data-ordenar="peso_liquido_kg">Peso líquido</th>
+              <th data-ordenar="peso_total_desossado">Desossado</th>
+              <th data-ordenar="quebra_pct">Quebra %</th>
+              <th data-ordenar="margem_pct">Margem %</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="painel-gestor.js"></script>
+</body>
+</html>
