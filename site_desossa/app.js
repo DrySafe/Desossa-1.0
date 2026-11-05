@@ -457,6 +457,7 @@ function renderLancar() {
           </div>
           <span>${state.usuario.nome}</span>
         </button>
+        ${['gestor', 'admin'].includes(state.usuario.nivel_acesso) ? '<button class="botao-secundario" id="btn-acesso-gestor">Área do gestor</button>' : ''}
       </header>
 
       ${lote ? `
@@ -491,6 +492,7 @@ function renderLancar() {
       <div id="lista-recentes"></div>
     </div>
   `);
+  document.getElementById("btn-acesso-gestor")?.addEventListener("click", () => irPara("admin"));
   document.getElementById("btn-meu-perfil").addEventListener("click", () => irPara("perfil"));
 
   if (!lote) {

@@ -15,7 +15,7 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  if(u.pathname.startsWith('/api/')){
   const chunks=[];for await(const c of req)chunks.push(c);const body=Buffer.concat(chunks).toString();
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
-  if(u.pathname==='/api/session')return res.end(JSON.stringify(req.method==='GET'?{colaboradores:[pessoa]}:{ok:true,usuario:pessoa,role:'operador'}));
+  if(u.pathname==='/api/session')return res.end(JSON.stringify(req.method==='GET'?{colaboradores:[pessoa],role:'gestor'}:{ok:true,usuario:pessoa,role:'operador'}));
   const query=new URL(u.searchParams.get('path'),'https://test.invalid'),table=query.pathname.split('/').pop();
   if(req.method==='POST'&&table==='lancamentos'){inserted.push(JSON.parse(body));return res.end('');}
   const data=datasets[table]||[];res.setHeader('Content-Range','0-'+Math.max(data.length-1,0)+'/'+data.length);
@@ -37,6 +37,12 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  for(const n of '1234')await page.locator('[data-tecla="'+n+'"]').click();
  await page.waitForFunction(()=>!!state.usuario && state.cortes.length===1);
  assert.equal(await page.evaluate(()=>state.usuario.id),uid);
+ assert.equal(await page.locator('#btn-acesso-gestor').count(),0);
+ await page.evaluate(()=>{state.usuario.nivel_acesso='gestor';renderLancar()});
+ await page.locator('#btn-acesso-gestor').click();
+ await page.locator('[data-aba="cortes"]').waitFor();
+ await page.evaluate(()=>irPara('lancar'));
+ await page.locator('#btn-meu-perfil').waitFor();
  await context.setOffline(true);
  await page.evaluate(async({pid})=>{state.loteAtivo={id:pid,tipo:"traseiro",numero_peca:1,peso_entrada_kg:100};await salvarLancamento({codigo:'00123',nome:'PATINHO',peso:1.234,preco:20},'manual')},{pid});
  assert.equal(await page.evaluate(async()=>(await idbGetAll(STORES.fila)).length),1);
