@@ -125,3 +125,11 @@ Nenhum workflow foi ativado. O exemplo antigo foi desativado e não é o novo fl
 Nenhum teste automatizado promete ausência absoluta de falhas. A câmera física,
 o template real de planilha, o banco remoto provisionado e o ensaio com dados antigos
 são verificações de homologação distintas e não devem ser declaradas concluídas sem execução.
+
+## Estado do provisionamento
+
+O Supabase de testes já recebeu as migrações 001–009 e passou na validação remota.
+A chave de servidor foi configurada cifrada na Vercel. Consulte VALIDACAO-BANCO.md.
+Execute `python3 scripts/validate-test.py` para repetir o ensaio com rollback, usando
+somente a credencial administrativa do projeto de testes. Não há dados antigos
+importados nem workflow ativo.

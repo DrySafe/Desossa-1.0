@@ -27,6 +27,9 @@ test('PostgreSQL: compatibilidade, cálculos, auditoria, bloqueios e fila versio
  const pending=(await db.query('select * from app_sync_pendentes()')).rows[0].app_sync_pendentes;
  assert.ok(Number(pending.revisao)>Number(snapshot.revisao),'alteração posterior não é confirmada pela execução antiga');
  await db.query('select app_sync_confirmar($1,$2,$3)',[rid,pending.revisao,pending.lease]);
+ await db.query("update recebimentos set status='finalizado' where id=$1",[rid]);
+ await assert.rejects(db.query('update lancamentos set preco_venda_kg=99 where id=$1',[ids[1]]),/Reabra/);
+ await db.query("update recebimentos set status='aberto' where id=$1",[rid]);
  await db.query("select app_excluir('lancamento',$1,$2)",[ids[1],uid]);
  const deleted=(await db.query('select * from app_sync_pendentes()')).rows[0].app_sync_pendentes;
  assert.equal(deleted.lancamentos.length,2,'exclusão gera snapshot atualizado');
