@@ -18,6 +18,10 @@ são históricos. As migrações revisadas estão em `supabase/migrations`.
   ausente aparece como pendente. Valores são estimativas de produção, não vendas
   efetivas no caixa. O custo atual do recebimento continua sendo a referência;
   alterações são auditadas, não reconstituímos custos históricos desconhecidos.
+- O acompanhamento imprime/salva PDF em A4 horizontal com filtros, data da consulta,
+  resumo, peças e totais do filtro. Cabeçalhos repetem em páginas seguintes; CSV
+  continua disponível como opção secundária. Sair do acompanhamento volta ao app
+  sem encerrar a sessão de gestor. Impressão é bloqueada quando os dados não estão confirmados.
 - Toda consulta do painel verifica erros, contagem e paginação. Uma falha impede
   exportar totais; não transforma erro em zero. Nomes são tratados como texto.
 - Fila e histórico são salvos em uma única transação IndexedDB. Erros de validação

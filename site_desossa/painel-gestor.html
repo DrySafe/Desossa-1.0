@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="painel-gestor.css" />
 </head>
 <body>
-<div role="status" style="background:#ffe08a;color:#241d00;padding:10px;text-align:center;font-weight:bold">AMBIENTE DE TESTES — dados sem validade operacional</div>
+<div class="aviso-ambiente" role="status" style="background:#ffe08a;color:#241d00;padding:10px;text-align:center;font-weight:bold">AMBIENTE DE TESTES — dados sem validade operacional</div>
 
 <!-- A sessão e a permissão atual são verificadas no servidor. -->
 <div id="portao" class="portao">
@@ -26,6 +26,7 @@
 <div id="painel" class="painel hidden">
   <aside class="barra-lateral">
     <div class="marca">DESOSSA<span>painel</span></div>
+    <a class="botao-sair" href="index.html">← Sair do acompanhamento</a>
 
     <div class="filtro-bloco">
       <label>Período</label>
@@ -59,14 +60,27 @@
     <button id="btn-atualizar" class="botao-atualizar">Atualizar dados</button>
     <div id="ultima-atualizacao" class="ultima-atualizacao"></div>
 
-    <button id="btn-exportar" class="botao-exportar">⬇ Exportar CSV (peças)</button>
+    <button id="btn-imprimir" class="botao-imprimir" type="button" disabled>Imprimir / Salvar PDF</button>
+    <p class="dica-impressao">Relatório organizado com os filtros selecionados.</p>
+    <button id="btn-exportar" class="botao-exportar" type="button" disabled>Exportar CSV (planilha)</button>
   </aside>
 
   <main class="conteudo">
     <header class="conteudo-topo">
-      <h1>Acompanhamento da Desossa</h1>
+      <div class="topo-acoes">
+        <h1>Acompanhamento da Desossa</h1>
+        <a id="btn-sair-painel" class="botao-sair" href="index.html">← Sair do acompanhamento</a>
+      </div>
       <p id="resumo-periodo" class="resumo-periodo"></p>
     </header>
+
+    <section id="cabecalho-impressao" class="somente-impressao">
+      <div class="marca-impressao">DESOSSA · ACOMPANHAMENTO</div>
+      <h1>Relatório de acompanhamento da desossa</h1>
+      <p id="impressao-filtros"></p>
+      <p id="impressao-atualizacao"></p>
+      <p class="selo-teste">AMBIENTE DE TESTES — dados sem validade operacional</p>
+    </section>
 
     <div id="grid-kpi" class="grid-kpi"></div>
 
@@ -83,11 +97,13 @@
             <th data-ordenar="valor">Valor estimado</th><th data-ordenar="custo">Custo</th><th>Conferência</th>
           </tr></thead>
           <tbody></tbody>
+          <tfoot id="totais-pecas"></tfoot>
         </table>
       </div>
     </section>
   </main>
 </div>
+<p class="impressao-bloqueada">Relatório indisponível. Confirme o acesso e atualize os dados antes de imprimir.</p>
 
 <script src="vendor/supabase-2.119.0.js"></script>
 

@@ -18,6 +18,7 @@ async function carregarDados() {
   const id = ++estado.requisicao;
   estado.pronto = false;
   $('btn-exportar').disabled = true;
+  $('btn-imprimir').disabled = true;
   $('resumo-periodo').textContent = 'Carregando todos os registros do período…';
   const inicio = $('data-inicio').value, fim = $('data-fim').value;
   try {
@@ -42,8 +43,10 @@ async function carregarDados() {
     $('filtro-fornecedor').replaceChildren(new Option('Todos', ''));
     [...new Set(linhas.map(p => p.fornecedor || 'Legado sem recebimento'))].sort().forEach(n => $('filtro-fornecedor').add(new Option(n, n)));
     $('filtro-fornecedor').value = anterior;
+    estado.consulta = { inicio, fim, atualizadoEm: new Date() };
     estado.pronto = true;
     $('btn-exportar').disabled = false;
+    $('btn-imprimir').disabled = false;
     $('resumo-periodo').textContent = `${dataBR(inicio)} até ${dataBR(fim)} · por data do recebimento; peças legadas usam a data de entrada disponível.`;
     $('ultima-atualizacao').textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     renderizar();
@@ -52,6 +55,7 @@ async function carregarDados() {
     estado.linhas = [];
     $('grid-kpi').replaceChildren();
     $('tabela-pecas').querySelector('tbody').replaceChildren();
+    $('totais-pecas').replaceChildren();
     $('resumo-periodo').textContent = 'Relatório indisponível: ' + (err.message || 'confira a conexão.');
     $('ultima-atualizacao').textContent = 'Dados não confirmados. Não utilize totais anteriores.';
   }
@@ -84,7 +88,11 @@ function renderizar() {
     for (const v of [p.fornecedor, p.tipo, p.numero_peca ?? '—', dataBR(p.data_referencia), kg(p.entrada), kg(p.carne), kg(p.sebo), kg(p.quebra), kg(p.saldo), moeda(p.valor), moeda(p.custo), p.statusConferencia + (p.provisorio ? ' · provisório' : '')]) celula(tr, v);
     tbody.append(tr);
   }
-  if (!linhas.length) { const tr=document.createElement('tr'); celula(tr,'Nenhuma peça no período.'); tbody.append(tr); }
+  if (!linhas.length) { const tr=document.createElement('tr'); const td=document.createElement('td');td.colSpan=12;td.textContent='Nenhuma peça no período.';tr.append(td);tbody.append(tr); }
+  const total=document.createElement('tr'),label=document.createElement('td');
+  label.colSpan=4;label.textContent='TOTAL DO FILTRO';total.append(label);
+  for (const valor of [kg(m.entrada),kg(m.carne),kg(m.sebo),kg(m.quebra),kg(m.saldo),moeda(m.valor),moeda(m.custo),`${m.pecas} peça(s)`]) celula(total,valor);
+  $('totais-pecas').replaceChildren(total);
 }
 function exportarCSV() {
   if (!estado.pronto) return;
@@ -92,8 +100,28 @@ function exportarCSV() {
     ...filtrar().map(p => [p.fornecedor,p.tipo,p.numero_peca,p.data_referencia,p.entrada,p.carne,p.sebo,p.quebra,p.saldo,p.valor,p.custo,p.statusConferencia])];
   const csv = linhas.map(l => l.map(Relatorios.campoCSV).join(';')).join('\r\n');
   const url = URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
-  const a=document.createElement('a');a.href=url;a.download=`desossa-testes-${$('data-inicio').value}-${$('data-fim').value}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const a=document.createElement('a');a.href=url;a.download=`desossa-testes-${estado.consulta.inicio}-${estado.consulta.fim}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+const tituloOriginal = document.title;
+function prepararImpressao() {
+  const pronto = estado.pronto && !!estado.consulta;
+  document.body.classList.toggle('impressao-indisponivel', !pronto);
+  if (!pronto) return false;
+  renderizar();
+  const fornecedor = $('filtro-fornecedor').selectedOptions[0]?.textContent || 'Todos';
+  const tipo = $('filtro-tipo').selectedOptions[0]?.textContent || 'Todos';
+  $('impressao-filtros').textContent = `Período: ${dataBR(estado.consulta.inicio)} a ${dataBR(estado.consulta.fim)} · Fornecedor: ${fornecedor} · Tipo: ${tipo}`;
+  const fmt = { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' };
+  $('impressao-atualizacao').textContent = `Dados consultados em ${estado.consulta.atualizadoEm.toLocaleString('pt-BR', fmt)} · Emitido em ${new Date().toLocaleString('pt-BR', fmt)}`;
+  document.title = `Acompanhamento-desossa-${estado.consulta.inicio}-a-${estado.consulta.fim}`;
+  return true;
+}
+function imprimirRelatorio() {
+  if (prepararImpressao()) window.print();
+}
+window.addEventListener('beforeprint', prepararImpressao);
+window.addEventListener('afterprint', () => { document.title = tituloOriginal; });
+
 let verificandoAcesso = false;
 async function verificarAcesso() {
   if (verificandoAcesso) return;
@@ -124,6 +152,7 @@ $('portao-tentar').addEventListener('click', verificarAcesso);
 verificarAcesso();
 $('btn-atualizar').addEventListener('click',carregarDados);
 $('btn-exportar').addEventListener('click',exportarCSV);
+$('btn-imprimir').addEventListener('click',imprimirRelatorio);
 for(const id of ['data-inicio','data-fim']) $(id).addEventListener('change',carregarDados);
 for(const id of ['filtro-fornecedor','filtro-tipo']) $(id).addEventListener('change',renderizar);
 document.querySelectorAll('[data-dias]').forEach(b=>b.addEventListener('click',()=>{periodo(Number(b.dataset.dias));carregarDados()}));

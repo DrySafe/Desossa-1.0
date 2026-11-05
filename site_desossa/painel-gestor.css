@@ -35,7 +35,7 @@ button, input, select { font-family: var(--body); }
 .portao-erro { color: var(--meat); font-size: 13px; margin-top: 10px; }
 
 /* ---------- Layout principal ---------- */
-.painel { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+.painel { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
 .barra-lateral {
   background: var(--ink); color: #D9E0DB; padding: 24px 20px; display: flex; flex-direction: column; gap: 20px;
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
@@ -63,7 +63,7 @@ button, input, select { font-family: var(--body); }
 .botao-exportar { background: transparent; border: 1px solid #3A4640; color: #D9E0DB; }
 .ultima-atualizacao { font-size: 11px; color: #6E7D74; text-align: center; }
 
-.conteudo { padding: 32px 40px; max-width: 1400px; }
+.conteudo { padding: 32px 40px; max-width: 1400px; min-width: 0; width: 100%; }
 .conteudo-topo h1 { font-family: var(--display); font-size: 34px; margin: 0; }
 .resumo-periodo { color: var(--ink-soft); font-size: 14px; margin: 4px 0 24px; }
 
@@ -106,4 +106,61 @@ tbody tr:hover { background: #FAFAF9; }
   .barra-lateral { position: static; height: auto; flex-direction: row; flex-wrap: wrap; }
   .grid-graficos { grid-template-columns: 1fr; }
   .conteudo { padding: 20px; }
+}
+
+/* Navegação e ações do relatório */
+.conteudo-topo { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 12px 0 4px; }
+.topo-acoes { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+.botao-sair { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 12px 18px; border-radius: 10px; background: var(--meat); color: #fff; font-size: 14px; font-weight: 700; text-decoration: none; border: 2px solid var(--meat); }
+.botao-sair:hover { background: #85321f; border-color: #85321f; }
+.botao-sair:focus-visible, .botao-imprimir:focus-visible { outline: 3px solid var(--steel); outline-offset: 3px; }
+.botao-imprimir { padding: 14px 12px; border: 2px solid #fff; border-radius: 10px; background: #fff; color: var(--ink); font: inherit; font-weight: 800; cursor: pointer; }
+.dica-impressao { font-size: 12px; line-height: 1.5; color: #c7d2cb; margin: -12px 0 0; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+tfoot td { font-weight: 700; background: #edf1ed; border-top: 2px solid var(--steel); }
+.somente-impressao, .impressao-bloqueada { display: none; }
+@media (max-width: 650px) {
+  .topo-acoes { align-items: stretch; }
+  .botao-sair { width: 100%; }
+  .conteudo-topo h1 { font-size: 28px; }
+  .barra-lateral .botao-imprimir, .barra-lateral .botao-exportar { flex: 1 1 100%; }
+  .dica-impressao { margin: 0; }
+}
+
+/* Mesmo fluxo dos PDFs do app: impressão do navegador / Salvar como PDF. */
+@page { size: A4 landscape; margin: 12mm; }
+@media print {
+  html, body { background: #fff !important; color: #111; font-family: Arial, sans-serif; }
+  .barra-lateral, .conteudo-topo, .aviso-ambiente, #portao { display: none !important; }
+  .painel { display: block; min-height: auto; }
+  .conteudo { max-width: none; width: 100%; padding: 0; }
+  .somente-impressao { display: block; }
+  #cabecalho-impressao { border-bottom: 2px solid #1e2422; padding-bottom: 4mm; margin-bottom: 5mm; break-inside: avoid; }
+  .marca-impressao { font-size: 9pt; font-weight: 700; letter-spacing: 1pt; }
+  #cabecalho-impressao h1 { font-size: 19pt; margin: 2mm 0 3mm; }
+  #cabecalho-impressao p { font-size: 9pt; line-height: 1.5; margin: 1mm 0; }
+  #cabecalho-impressao .selo-teste { font-size: 8pt; font-weight: 700; }
+  .grid-kpi { grid-template-columns: repeat(3, 1fr); gap: 2mm; margin-bottom: 4mm; }
+  .kpi-card { padding: 2.5mm 3mm; border: 1px solid #aaa; border-radius: 0; break-inside: avoid; }
+  .kpi-card .kpi-label { font-size: 8pt; color: #333; }
+  .kpi-card .kpi-valor { font-family: Arial, sans-serif; font-size: 13pt; }
+  #aviso-conferencia { font-size: 8pt; line-height: 1.5; margin: 3mm 0; }
+  .cartao { padding: 0; border: 0; border-radius: 0; }
+  .cartao h2 { font-family: Arial, sans-serif; font-size: 12pt; break-after: avoid; margin: 4mm 0 2mm; }
+  .tabela-wrap { overflow: visible; }
+  #tabela-pecas { table-layout: fixed; width: 100%; font-size: 7.5pt; }
+  #tabela-pecas th, #tabela-pecas td { padding: 2mm 1mm; white-space: normal; overflow-wrap: anywhere; vertical-align: top; border: 1px solid #aaa; }
+  #tabela-pecas th { font-size: 7pt; color: #111; background: #eee; }
+  #tabela-pecas th:nth-child(1) { width: 18%; }
+  #tabela-pecas th:nth-child(2) { width: 7%; }
+  #tabela-pecas th:nth-child(3) { width: 4%; }
+  #tabela-pecas th:nth-child(4) { width: 8%; }
+  #tabela-pecas th:nth-child(n+5):nth-child(-n+9) { width: 7%; }
+  #tabela-pecas th:nth-child(10), #tabela-pecas th:nth-child(11) { width: 9%; }
+  #tabela-pecas th:nth-child(12) { width: 10%; }
+  thead { display: table-header-group; }
+  tfoot { display: table-row-group; }
+  tr { break-inside: avoid; }
+  body.impressao-indisponivel #painel { display: none !important; }
+  body.impressao-indisponivel .impressao-bloqueada { display: block; font-size: 12pt; }
 }
