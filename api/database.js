@@ -42,9 +42,9 @@ module.exports=async(req,res)=>{
    }else if(!(method==='PATCH'&&table==='lotes'&&Object.keys(body).length===1&&typeof body.data_desossa==='string'&&u.searchParams.get('data_desossa')==='is.null'))throw c.error(403,'Operação de gestor necessária.');
   }
   if(table.startsWith('vw_'))throw c.error(403,'Relatório é somente leitura.');
-  if(method==='DELETE'&&!['lotes','lancamentos'].includes(table))throw c.error(403,'Exclusão não permitida.');
+  if(method==='DELETE')throw c.error(403,'Use a exclusão transacional com auditoria.');
   if(table==='auditoria_eventos')throw c.error(403,'Auditoria é somente leitura.');
-  if(table==='exclusoes_log'&&method!=='POST')throw c.error(403,'Auditoria não pode ser alterada.');
+  if(table==='exclusoes_log')throw c.error(403,'Histórico de exclusões é somente leitura.');
  }
  const headers={'x-desossa-ator':s.uid || 'gestor'};
  if(req.headers.prefer){

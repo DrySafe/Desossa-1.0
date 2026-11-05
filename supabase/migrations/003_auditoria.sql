@@ -27,7 +27,7 @@ end $$;
 
 create or replace function public.app_excluir(p_tipo text,p_id uuid,p_ator uuid default null) returns void
 language plpgsql security definer set search_path=pg_catalog,public as $$
-declare dados jsonb;
+declare dados jsonb; rid uuid; situacao text;
 begin
  if p_tipo='lancamento' then
   select to_jsonb(l) into dados from public.lancamentos l where id=p_id for update;
@@ -35,6 +35,12 @@ begin
   select jsonb_build_object('lote',to_jsonb(l),'lancamentos',coalesce((select jsonb_agg(to_jsonb(c)) from public.lancamentos c where c.lote_id=l.id),'[]'::jsonb)) into dados from public.lotes l where id=p_id for update;
  else raise exception 'Tipo de exclusão inválido'; end if;
  if dados is null then raise exception 'Registro não encontrado'; end if;
+ if p_tipo='peca' then select recebimento_id into rid from public.lotes where id=p_id;
+ else select lo.recebimento_id into rid from public.lotes lo join public.lancamentos l on l.lote_id=lo.id where l.id=p_id; end if;
+ if rid is not null then
+  select status into situacao from public.recebimentos where id=rid for update;
+  if situacao='finalizado' then raise exception 'Reabra o recebimento antes de excluir registros'; end if;
+ end if;
  insert into public.exclusoes_log(tipo,registro_id,dados_excluidos,colaborador_id) values(p_tipo,p_id,dados,p_ator);
  if p_tipo='lancamento' then delete from public.lancamentos where id=p_id;
  else delete from public.lotes where id=p_id; end if;
