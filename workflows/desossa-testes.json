@@ -1,0 +1,233 @@
+{
+  "name": "Desossa TESTES — snapshot completo isolado",
+  "nodes": [
+    {
+      "name": "Início manual",
+      "id": "manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Buscar snapshots",
+      "id": "app_sync_pendentes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://dkiyakjftqcbbnfrgnmh.supabase.co/rest/v1/rpc/app_sync_pendentes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_CREDENCIAL_SUPABASE_TESTES",
+          "name": "Supabase TESTES — apikey servidor"
+        }
+      }
+    },
+    {
+      "name": "Montar snapshot completo",
+      "id": "snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "/* Espelha o estado completo: repetição não soma duas vezes e exclusões zeram células. */\nfunction montarSnapshot(d, permitidas) {\n if(d.project!=='dkiyakjftqcbbnfrgnmh'||!permitidas.includes(d.spreadsheetId))throw new Error('Destino não aprovado para testes.');\n const mapas={traseiro:{PATINHO:6,LAGARTO:7,MUSCULO:8,'COXAO DURO':9,'COXAO MOLE':10,'FILE MIGNON':11,RABO:12,FRALDINHA:13,COSTELA:14,MAMINHA:15,'CONTRA FILE':16,ALCATRA:17,PICANHA:18,'SEBO E OSSO':19,QUEBRA:20},dianteiro:{PALETA:29,ACEM:30,PEITO:31,CUPIM:32,COSTELA:33,MUSCULO:34,'SEBO E OSSO':35,QUEBRA:36}};\n const normalizar=s=>String(s).trim().toUpperCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/\\s+/g,' ').replace(/^CARNE\\s+/,'').replace(/\\s+(C\\/OSSO|S\\/OSSO)$/,'');\n const somas=new Map(),data=[];\n for(const p of d.pecas){if(!mapas[p.tipo]||!Number.isInteger(Number(p.numero_peca))||Number(p.numero_peca)<1||Number(p.numero_peca)>20)throw new Error('Peça fora do layout de 20 colunas.');}\n for(const l of d.lancamentos){\n  const nome=l.codigo==='00000'?'QUEBRA':l.codigo==='93960'?'SEBO E OSSO':normalizar(l.nome);\n  const linha=mapas[l.tipo]?.[nome];if(!linha)throw new Error('Corte não mapeado: '+nome);\n  const num=Number(l.numero_peca);if(!Number.isInteger(num)||num<1||num>20)throw new Error('Número de peça inválido.');\n  const peso=Number(l.peso_kg);if(!Number.isFinite(peso)||peso<=0)throw new Error('Peso inválido.');\n  const range='Somas!'+String.fromCharCode(67+num-1)+linha;\n  somas.set(range,(somas.get(range)||0)+Math.round(peso*1000));\n }\n for(const [tipo,mapa] of Object.entries(mapas)){\n  for(let n=1;n<=20;n++)for(const linha of Object.values(mapa)){\n   const range='Somas!'+String.fromCharCode(67+n-1)+linha;data.push({range,values:[[(somas.get(range)||0)/1000]]});\n  }\n  const aba=tipo==='traseiro'?'TRAZEIRO':'DIANTEIRO';\n  const quantidade=d.recebimento['quantidade_'+tipo+'_esperada'];\n  if(quantidade==null||!Number.isInteger(Number(quantidade))||Number(quantidade)<0)throw new Error('Quantidade esperada não informada.');\n  const custo=d.recebimento['preco_kg_'+tipo];\n  if(custo!=null&&(!Number.isFinite(Number(custo))||Number(custo)<0))throw new Error('Custo inválido.');\n  const peso=d.pecas.filter(p=>p.tipo===tipo).reduce((s,p)=>{const n=Number(p.peso_entrada_kg);if(!Number.isFinite(n)||n<=0)throw new Error('Peso líquido inválido.');return s+Math.round(n*1000)},0)/1000;\n  data.push({range:aba+'!E4',values:[[Number(quantidade)]]},{range:aba+'!F4',values:[[peso]]},{range:aba+'!G4',values:[[custo==null?'':Number(custo)]]});\n }\n return {recebimento_id:d.recebimento_id,revisao:d.revisao,lease:d.lease,spreadsheetId:d.spreadsheetId,batchBody:{valueInputOption:'RAW',data}};\n}\n\n\nconst planilhasPermitidas = [\"CONFIGURAR_ID_PLANILHA_TESTES\"];\nreturn {json: montarSnapshot($json, planilhasPermitidas)};"
+      }
+    },
+    {
+      "name": "Gravar planilha de testes",
+      "id": "sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.batchBody) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_GOOGLE_TESTES",
+          "name": "Google Sheets — SOMENTE TESTES"
+        }
+      }
+    },
+    {
+      "name": "Confirmar revisão",
+      "id": "app_sync_confirmar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://dkiyakjftqcbbnfrgnmh.supabase.co/rest/v1/rpc/app_sync_confirmar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({p_id: $('Montar snapshot completo').item.json.recebimento_id,p_revisao: $('Montar snapshot completo').item.json.revisao,p_lease: $('Montar snapshot completo').item.json.lease}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_CREDENCIAL_SUPABASE_TESTES",
+          "name": "Supabase TESTES — apikey servidor"
+        }
+      }
+    },
+    {
+      "name": "Registrar falha sem confirmar",
+      "id": "app_sync_erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://dkiyakjftqcbbnfrgnmh.supabase.co/rest/v1/rpc/app_sync_erro",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({p_id: $('Montar snapshot completo').item.json.recebimento_id,p_lease: $('Montar snapshot completo').item.json.lease}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_CREDENCIAL_SUPABASE_TESTES",
+          "name": "Supabase TESTES — apikey servidor"
+        }
+      }
+    },
+    {
+      "name": "A cada 1 hora — somente após homologação",
+      "id": "agendamento-testes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Início manual": {
+      "main": [
+        [
+          {
+            "node": "Buscar snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A cada 1 hora — somente após homologação": {
+      "main": [
+        [
+          {
+            "node": "Buscar snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar snapshots": {
+      "main": [
+        [
+          {
+            "node": "Montar snapshot completo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar snapshot completo": {
+      "main": [
+        [
+          {
+            "node": "Gravar planilha de testes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar planilha de testes": {
+      "main": [
+        [
+          {
+            "node": "Confirmar revisão",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha sem confirmar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 300,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none"
+  }
+}

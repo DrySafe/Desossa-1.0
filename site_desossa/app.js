@@ -3,6 +3,11 @@
 // ============================================================
 const el = document.getElementById("app");
 const nav = document.getElementById("bottom-nav");
+el.addEventListener("click", (event) => {
+  const acao = event.target.closest("[data-test-action]")?.dataset.testAction;
+  if (acao === "voltar-lote") irPara("lote");
+  if (acao === "imprimir") window.print();
+});
 
 let abaLoteAtual = "abertos"; // Guarda a aba selecionada pelo usuário (abertos x concluidos)
 
@@ -34,6 +39,8 @@ function irPara(rota) {
 window.addEventListener("hashchange", renderRota);
 
 async function renderRota() {
+  await pararScanner();
+  scannerAberto = false;
   const rota = (location.hash || "#login").slice(1);
 
   if (rota === "admin") return renderAdmin();
@@ -51,7 +58,7 @@ async function renderRota() {
 
   if (rota === "lote") {
     if (navigator.onLine) {
-      el.innerHTML = `<div class="screen lote-screen"><p class="empty-msg">Conferindo peças no servidor…</p></div>`;
+      el.innerHTML = sanitizarHTML(`<div class="screen lote-screen"><p class="empty-msg">Conferindo peças no servidor…</p></div>`);
       await atualizarCacheReferencia();
       state.progressoRecebimentos = await buscarProgressoRecebimentos();
     }
@@ -82,23 +89,32 @@ function renderLogin() {
     </button>
   `).join("");
 
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen login-screen">
-      <div class="brand-mark">DESOSSA</div>
+      <div class="brand-mark">DESOSSA · TESTES</div>
       <h1 class="login-title">Quem é você?</h1>
       <div class="login-grid">
-        ${cards || '<p class="empty-msg">Nenhum colaborador cadastrado ainda.</p>'}
+        ${cards || `<p class="empty-msg">${state.erroInicial || 'Nenhum colaborador cadastrado ainda.'}</p>`}
       </div>
       <button class="link-discreto" id="btn-area-gestor">Área do gestor</button>
+      <button class="link-discreto" id="btn-backup-pendencias">Exportar pendências para recuperação</button>
+      <button class="link-discreto" id="btn-restaurar-pendencias">Restaurar pendências de testes</button>
+      <input type="file" id="backup-arquivo" accept="application/json" class="hidden" />
       <button class="link-discreto" id="btn-forcar-atualizacao">🔄 Forçar atualização do app</button>
     </div>
-  `;
+  `);
 
   el.querySelectorAll(".login-card").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.candidatoLogin = state.colaboradores.find((c) => c.id === btn.dataset.id);
       renderPin();
     });
+  });
+  document.getElementById("btn-backup-pendencias").addEventListener("click", () => exportarPendencias().catch(e=>alert(e.message)));
+  document.getElementById("btn-restaurar-pendencias").addEventListener("click",()=>document.getElementById("backup-arquivo").click());
+  document.getElementById("backup-arquivo").addEventListener("change",async e=>{
+    const arquivo=e.target.files[0];if(!arquivo)return;
+    try{const n=await restaurarPendencias(arquivo);mostrarToast(`${n} pendência(s) conferidas. Entre com o usuário original para enviar.`);atualizarBadgePendente()}catch(err){alert(err.message)}
   });
   document.getElementById("btn-area-gestor").addEventListener("click", () => irPara("admin"));
   document.getElementById("btn-forcar-atualizacao").addEventListener("click", forcarAtualizacaoApp);
@@ -118,7 +134,7 @@ async function forcarAtualizacaoApp() {
     mostrarToast("Atualizando…");
     setTimeout(() => location.reload(), 500);
   } catch (err) {
-    alert("Não consegui atualizar sozinho. Tente limpar os dados do site pelas configurações do navegador.");
+    alert("Não consegui atualizar. Exporte as pendências antes de qualquer manutenção; não limpe os dados do site.");
   }
 }
 
@@ -220,12 +236,12 @@ async function renderRelatorioDesossa(recebimentoId) {
   // Cálculo do Total Geral do Recebimento (Dianteiro + Traseiro)
   const pesoTotalDesossadoGeral = lancamentos.reduce((s, l) => s + Number(l.peso_kg || 0), 0);
 
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen relatorio-print-area" style="max-width:900px; width:100%; margin:20px auto; background:#ffffff; color:#1E2422; padding:24px; border-radius:16px; border:1px solid #DADFDC; box-shadow:0 4px 12px rgba(0,0,0,0.05); height:auto !important; min-height:auto !important;">
       
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;" class="no-print">
-        <button class="voltar" onclick="irPara('lote')" style="margin:0; cursor:pointer;">‹ Voltar</button>
-        <button onclick="window.print()" class="botao-grande botao-confirmar" style="width:auto; padding:10px 20px; font-size:15px; margin:0; cursor:pointer;">
+        <button class="voltar" data-test-action="voltar-lote" style="margin:0; cursor:pointer;">‹ Voltar</button>
+        <button data-test-action="imprimir" class="botao-grande botao-confirmar" style="width:auto; padding:10px 20px; font-size:15px; margin:0; cursor:pointer;">
           🖨️ Imprimir / Salvar PDF
         </button>
       </div>
@@ -247,15 +263,16 @@ async function renderRelatorioDesossa(recebimentoId) {
       </div>
 
     </div>
-  `;
+  `);
 }
 
 // ---------- PIN ----------
 let pinDigitado = "";
+let autenticandoPin = false;
 function renderPin() {
   const c = state.candidatoLogin;
   pinDigitado = "";
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen pin-screen">
       <button class="voltar" id="pin-voltar">‹ Voltar</button>
       <div class="pin-avatar" style="background-image:url('${c.foto_url || ""}')">
@@ -273,7 +290,7 @@ function renderPin() {
         ).join("")}
       </div>
     </div>
-  `;
+  `);
   document.getElementById("pin-voltar").addEventListener("click", () => {
     state.candidatoLogin = null;
     renderLogin();
@@ -282,6 +299,7 @@ function renderPin() {
 }
 
 async function onTeclaPin(tecla) {
+  if (autenticandoPin) return;
   const erroEl = document.getElementById("pin-erro");
   if (erroEl) erroEl.classList.add("hidden");
 
@@ -300,28 +318,32 @@ async function onTeclaPin(tecla) {
   document.querySelectorAll("#pin-dots .dot").forEach((d, i) => d.classList.toggle("preenchido", i < pinDigitado.length));
 
   if (pinDigitado.length === 4) {
-    const hash = await sha256Hex(pinDigitado);
-    
-    if (state.candidatoLogin.pin_hash && hash === state.candidatoLogin.pin_hash) {
-      state.usuario = state.candidatoLogin;
+    autenticandoPin = true;
+    try {
+      const data = await sessaoAPI({ id: state.candidatoLogin.id, pin: pinDigitado });
+      state.usuario = data.usuario;
+      sincronizacaoAutorizada = true;
       state.candidatoLogin = null;
-      await salvarSessao(state.usuario);
       pinDigitado = "";
-      irPara("lancar"); // O 'hashchange' já se encarrega de chamar o renderRota() sozinho
-    } else {
+      await salvarSessao(state.usuario);
+      await atualizarCacheReferencia();
+      state.cortes = await idbGetAll(STORES.cortes);
+      state.recebimentos = await idbGetAll(STORES.recebimentos);
+      state.lotes = await idbGetAll(STORES.lotes);
+      irPara("lancar");
+    } catch (err) {
+      pinDigitado = "";
+      mostrarToast(err.message);
       if (erroEl) erroEl.classList.remove("hidden");
-      setTimeout(() => { 
-        pinDigitado = ""; 
-        document.querySelectorAll("#pin-dots .dot").forEach((d) => d.classList.remove("preenchido")); 
-      }, 500);
-    }
+      document.querySelectorAll("#pin-dots .dot").forEach(d => d.classList.remove("preenchido"));
+    } finally { autenticandoPin = false; }
   }
 }
 
 // ---------- Perfil ----------
 function renderPerfil() {
   const u = state.usuario;
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen pin-screen">
       <button class="voltar" id="perfil-voltar">‹ Voltar</button>
       <div class="pin-avatar" id="perfil-avatar" style="background-image:url('${u.foto_url || ""}')">
@@ -345,7 +367,7 @@ function renderPerfil() {
         <button type="submit" class="botao-grande botao-confirmar">Salvar alterações</button>
       </form>
     </div>
-  `;
+  `);
   document.getElementById("perfil-voltar").addEventListener("click", () => irPara("lancar"));
 
   let fotoSelecionada = null;
@@ -373,8 +395,7 @@ function renderPerfil() {
     const pinNovo = document.getElementById("perfil-pin-novo").value.trim();
     const pinConfirmar = document.getElementById("perfil-pin-confirmar").value.trim();
 
-    const hashAtual = await sha256Hex(pinAtual);
-    if (hashAtual !== u.pin_hash) return alert("PIN atual incorreto.");
+    // O PIN é verificado exclusivamente no servidor.
 
     if (pinNovo || pinConfirmar) {
       if (!/^\d{4}$/.test(pinNovo)) return alert("O novo PIN precisa ter exatamente 4 números.");
@@ -389,10 +410,10 @@ function renderPerfil() {
     try {
       let foto_url = null;
       if (fotoSelecionada) foto_url = await uploadFotoColaborador(fotoSelecionada, u.id);
-      await editarColaborador(u.id, { nome: u.nome, foto_url, pin: pinNovo || null });
+      await sessaoAPI({ id: u.id, pin: pinAtual, novoPin: pinNovo || null, foto_url });
 
       if (foto_url) u.foto_url = foto_url;
-      if (pinNovo) u.pin_hash = await sha256Hex(pinNovo);
+
       state.usuario = u;
       await salvarSessao(u);
 
@@ -408,6 +429,8 @@ function renderPerfil() {
 }
 
 async function trocarUsuario() {
+  sincronizacaoAutorizada = false;
+  try { await sessaoAPI(null, "DELETE"); } catch {}
   state.usuario = null;
   state.loteAtivo = null;
   await limparSessao();
@@ -425,7 +448,7 @@ function renderLancar() {
   leituraAtual = null;
   scannerAberto = false;
 
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen lancar-screen">
       <header class="topo">
         <button class="topo-usuario" id="btn-meu-perfil">
@@ -467,7 +490,7 @@ function renderLancar() {
 
       <div id="lista-recentes"></div>
     </div>
-  `;
+  `);
   document.getElementById("btn-meu-perfil").addEventListener("click", () => irPara("perfil"));
 
   if (!lote) {
@@ -499,7 +522,7 @@ async function lancarQuebraAutomatica(pesoQuebraKg) {
       preco: precoKg
     }, "manual"); // <-- ALTERADO AQUI: de "calculado_quebra" para "manual"
 
-    mostrarToast(`Quebra de ${pesoFormatado} kg lançada com sucesso!`);
+    mostrarToast(`Quebra de ${pesoFormatado} kg salva no aparelho. Confira a confirmação de envio.`);
   } catch (err) {
     alert("Erro ao lançar a quebra: " + err.message);
   }
@@ -507,8 +530,8 @@ async function lancarQuebraAutomatica(pesoQuebraKg) {
 
 function renderVisor(dados) {
   const area = document.getElementById("visor-area");
-  if (!dados) { area.innerHTML = ""; return; }
-  area.innerHTML = `
+  if (!dados) { area.innerHTML = sanitizarHTML(""); return; }
+  area.innerHTML = sanitizarHTML(`
     <div class="visor-balanca">
       <div class="visor-linha visor-corte">${dados.nome || "CÓDIGO NÃO CADASTRADO"}</div>
       <div class="visor-linha visor-peso">
@@ -527,7 +550,7 @@ function renderVisor(dados) {
       <button class="botao-secundario" id="btn-cancelar-leitura">Cancelar</button>
       <button class="botao-grande botao-confirmar" id="btn-confirmar-leitura">Confirmar lançamento</button>
     </div>
-  `;
+  `);
   document.getElementById("btn-cancelar-leitura").addEventListener("click", () => { pararScanner(); renderLancar(); });
   document.getElementById("btn-confirmar-leitura").addEventListener("click", confirmarLancamento);
 
@@ -567,7 +590,7 @@ async function abrirScanner() {
   flashLigado = false;
   leiturasLote.clear();
 
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen scanner-screen" style="display:flex; flex-direction:column; height:100vh; overflow:hidden;">
       <header class="topo-scanner" style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:#000; color:#fff; flex-shrink:0;">
         <button class="voltar" id="scanner-voltar">‹ Voltar</button>
@@ -592,7 +615,7 @@ async function abrirScanner() {
         </div>
       </div>
     </div>
-  `;
+  `);
 
   document.getElementById("scanner-voltar").addEventListener("click", () => { 
     pararScanner(); 
@@ -607,7 +630,7 @@ async function abrirScanner() {
       if (!decodificado || !decodificado.codigoBruto) return;
       if (leiturasLote.has(decodificado.codigoBruto)) return;
 
-      const corte = state.cortes.find((c) => String(c.codigo) === String(decodificado.codigo));
+      const corte = encontrarCortePorCodigo(state.cortes, decodificado.codigo);
       
       let precoCalculado = decodificado.preco ?? (corte ? corte.preco_venda_kg : null);
       if (decodificado.valorTotal != null && decodificado.peso > 0) {
@@ -646,11 +669,11 @@ function atualizarListaLeiturasLote() {
   qtdEl.textContent = `${marcados}/${itens.length}`;
 
   if (itens.length === 0) {
-    container.innerHTML = '<p class="empty-msg">Aproxime a câmera das etiquetas para ler...</p>';
+    container.innerHTML = sanitizarHTML('<p class="empty-msg">Aproxime a câmera das etiquetas para ler...</p>');
     return;
   }
 
-  container.innerHTML = `
+  container.innerHTML = sanitizarHTML(`
     <ul class="recentes-lista" style="list-style:none; padding:0; margin:0;">
       ${itens.map((item) => `
         <li class="linha-com-lixeira ${!item.cadastrado ? 'item-invalido' : ''}" style="display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
@@ -665,7 +688,7 @@ function atualizarListaLeiturasLote() {
         </li>
       `).join("")}
     </ul>
-  `;
+  `);
 
   container.querySelectorAll("[data-check-bruto]").forEach((checkbox) => {
     checkbox.addEventListener("change", (e) => {
@@ -736,7 +759,7 @@ let corteSelecionadoManual = null;
 
 function abrirEntradaManual() {
   corteSelecionadoManual = null;
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen scanner-screen">
       <button class="voltar" id="manual-voltar">‹ Voltar</button>
       <h2 class="pin-label">Buscar corte</h2>
@@ -758,7 +781,7 @@ function abrirEntradaManual() {
         <button class="botao-grande botao-confirmar" id="btn-confirmar-manual">Confirmar lançamento</button>
       </div>
     </div>
-  `;
+  `);
   document.getElementById("manual-voltar").addEventListener("click", renderLancar);
 
   const busca = document.getElementById("busca-corte");
@@ -768,18 +791,18 @@ function abrirEntradaManual() {
   function renderLista() {
     const termo = busca.value;
     const resultados = state.cortes.filter((c) => c.ativo && corteCorresponde(c, termo)).slice(0, 30);
-    listaEl.innerHTML = resultados.map((c) => `
+    listaEl.innerHTML = sanitizarHTML(resultados.map((c) => `
       <button class="item-busca-corte" data-codigo="${c.codigo}">
         <span>${c.nome}</span>
         <span class="item-busca-preco">${fmtR$(c.preco_venda_kg)}/kg</span>
       </button>
-    `).join("") || '<p class="empty-msg">Nenhum corte encontrado.</p>';
+    `).join("") || '<p class="empty-msg">Nenhum corte encontrado.</p>');
     
     listaEl.querySelectorAll("[data-codigo]").forEach((btn) => btn.addEventListener("click", () => {
       corteSelecionadoManual = state.cortes.find((c) => c.codigo === btn.dataset.codigo);
       document.getElementById("nome-corte-escolhido").textContent = corteSelecionadoManual.nome;
       document.getElementById("input-preco-manual").value = corteSelecionadoManual.preco_venda_kg;
-      listaEl.innerHTML = "";
+      listaEl.innerHTML = sanitizarHTML("");
       busca.value = corteSelecionadoManual.nome;
       areaEscolhido.classList.remove("hidden");
       setTimeout(() => document.getElementById("input-peso-manual")?.focus(), 100);
@@ -824,8 +847,7 @@ async function salvarLancamento(dados, origem) {
     criado_em_dispositivo: new Date().toISOString()
   };
   try {
-    await enfileirarLancamento(lancamento);
-    await idbPut(STORES.lancamentosLote, {
+    await enfileirarLancamento(lancamento, {
       id: idLancamento,
       lote_id: state.loteAtivo.id,
       corte_nome: dados.nome,
@@ -839,7 +861,7 @@ async function salvarLancamento(dados, origem) {
   } catch (err) {
     registrarLog("erro", "Falha ao salvar lançamento localmente", { erro: String(err), lancamento });
     mostrarToast("⚠️ Erro ao salvar — veja Logs na Área do Gestor");
-    return;
+    throw err;
   }
 
   if (typeof tentarEnviarFila === "function") {
@@ -848,7 +870,7 @@ async function salvarLancamento(dados, origem) {
 
   atualizarBadgePendente();
   renderLancar();
-  mostrarToast(`${dados.nome} — ${fmtKg(dados.peso)} kg lançado`);
+  mostrarToast(`${dados.nome} — ${fmtKg(dados.peso)} kg salvo no aparelho; confira as pendências`);
 }
 
 // ---------- Histórico de cortes (Recentes) + Botão QUEBRA ----------
@@ -888,7 +910,7 @@ async function carregarRecentes() {
       </div>
     `;
 
-    area.innerHTML = resumoHtml + (registros.length ? `
+    area.innerHTML = sanitizarHTML(resumoHtml + (registros.length ? `
       <h3 class="recentes-titulo">Cortes já lançados nesta peça</h3>
       <ul class="recentes-lista">
         ${registros.map((r) => `
@@ -898,7 +920,7 @@ async function carregarRecentes() {
             <button class="link-discreto" data-excluir-lancamento="${r.id}" data-pendente="${r.pendente ? "1" : ""}">🗑️</button>
           </li>`).join("")}
       </ul>
-    ` : '<p class="empty-msg">Nenhum corte lançado ainda nesta peça.</p>');
+    ` : '<p class="empty-msg">Nenhum corte lançado ainda nesta peça.</p>'));
 
     // Evento do botão QUEBRA
     const btnQuebra = document.getElementById("btn-lancar-quebra");
@@ -910,12 +932,8 @@ async function carregarRecentes() {
     area.querySelectorAll("[data-excluir-lancamento]").forEach((btn) => btn.addEventListener("click", async () => {
       if (!confirm("Excluir esse corte lançado? Essa ação fica registrada no log.")) return;
       try {
-        if (btn.dataset.pendente) {
-          const itens = await idbGetAll(STORES.fila);
-          const item = itens.find((i) => i.payload.id === btn.dataset.excluirLancamento);
-          if (item) await idbDelete(STORES.fila, item.id_local);
-          await idbDelete(STORES.lancamentosLote, btn.dataset.excluirLancamento);
-          await registrarLog("info", "Lançamento pendente excluído antes de sincronizar", { id: btn.dataset.excluirLancamento, colaborador: state.usuario.id });
+        if (btn.dataset.pendente === "1") {
+          await cancelarPendencia(btn.dataset.excluirLancamento,state.usuario.id);
         } else {
           await excluirLancamento(btn.dataset.excluirLancamento, state.usuario.id);
         }
@@ -929,7 +947,7 @@ async function carregarRecentes() {
   };
 
   if (navigator.onLine) {
-    area.innerHTML = `<p class="empty-msg">Conferindo lançamentos no servidor…</p>`;
+    area.innerHTML = sanitizarHTML(`<p class="empty-msg">Conferindo lançamentos no servidor…</p>`);
     const doServidor = await buscarLancamentosDoLote(loteId);
     if (state.loteAtivo?.id !== loteId) return;
     if (doServidor) {
@@ -972,7 +990,7 @@ function renderItemPeca(l) {
   const completa = pecaEstaCompleta(l);
   return `
     <button class="lote-item ${state.loteAtivo && state.loteAtivo.id === l.id ? "selecionado" : ""} ${completa ? "completa" : ""}" data-id="${l.id}">
-      <span class="lote-tipo">Peça ${l.numero_peca} ${completa ? "✓" : ""}</span>
+      <span class="lote-tipo">Peça ${l.numero_peca ?? "sem número"} ${completa ? "✓" : ""}</span>
       <span>${fmtKg(l.peso_entrada_kg)} kg líquido${completa ? " · completa" : ""}</span>
     </button>
   `;
@@ -1034,8 +1052,7 @@ function renderLote() {
       ? r.progresso.quantidade_traseiro_real 
       : qtdTraseiroIniciadas;
 
-    // Link para a planilha do Google Sheets vinculada ao n8n/Supabase
-    const urlPlanilha = r.planilha_url || APP_CONFIG.URL_PLANILHA_GERAL || "#";
+    // Links de planilhas importados de produção não são renderizados nos testes.
 
     return `
       <div class="recebimento-grupo ${r.status === "finalizado" ? "recebimento-travado" : ""}" style="margin-bottom:16px;">
@@ -1080,9 +1097,9 @@ function renderLote() {
             </button>
           </div>
 
-          <a href="${urlPlanilha}" target="_blank" class="botao-secundario" style="display:block; text-align:center; text-decoration:none; margin-top:8px; font-size:12px; padding:7px; background:#EBF3EF; color:#1C5235; border:1px solid #B8D8C7; border-radius:8px; font-weight:600;">
-            📊 Baixar / Ver Planilha
-          </a>
+          <span aria-disabled="true" class="botao-secundario" style="display:block; text-align:center; text-decoration:none; margin-top:8px; font-size:12px; padding:7px; background:#EBF3EF; color:#1C5235; border:1px solid #B8D8C7; border-radius:8px; font-weight:600;">
+            📊 Planilha desativada nos testes
+          </span>
         </div>
 
         ${r.status === "finalizado" ? `
@@ -1105,7 +1122,7 @@ function renderLote() {
     `;
   }
 
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen lote-screen" style="max-width: 520px; margin: 0 auto; width: 100%;">
       <h2 class="titulo-tela">Escolha a peça em desossa</h2>
       <button class="botao-grande botao-confirmar" id="btn-novo-recebimento" style="margin-bottom:16px;">+ Registrar novo recebimento</button>
@@ -1119,13 +1136,14 @@ function renderLote() {
         </button>
       </div>
 
+      ${state.lotes.some(l => !l.recebimento_id) ? `<section><h3>Peças legadas sem recebimento</h3><p>Vínculos antigos preservados. Não é criado um recebimento fictício.</p>${state.lotes.filter(l => !l.recebimento_id).map(renderItemPeca).join("")}</section>` : ""}
       <div id="lista-recebimentos-conteudo">
         ${(abaLoteAtual === 'abertos' ? abertos : concluidos).map(renderCardRecebimento).join("") || `
           <p class="empty-msg">Nenhum recebimento ${abaLoteAtual === 'abertos' ? 'em aberto' : 'concluído'}.</p>
         `}
       </div>
     </div>
-  `;
+  `);
 
   document.getElementById("aba-lote-abertos").addEventListener("click", () => { abaLoteAtual = 'abertos'; renderLote(); });
   document.getElementById("aba-lote-concluidos").addEventListener("click", () => { abaLoteAtual = 'concluidos'; renderLote(); });
@@ -1165,7 +1183,7 @@ function renderLote() {
 
 // ---------- Novo recebimento ----------
 function renderNovoRecebimento() {
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen admin-screen">
       <button class="voltar" id="rec-voltar">‹ Voltar</button>
       <h2 class="titulo-tela">Novo recebimento</h2>
@@ -1190,7 +1208,7 @@ function renderNovoRecebimento() {
         <button type="submit" class="botao-grande botao-confirmar">Salvar e adicionar peças</button>
       </form>
     </div>
-  `;
+  `);
   document.getElementById("rec-voltar").addEventListener("click", () => irPara("lote"));
   document.getElementById("form-recebimento").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1235,7 +1253,7 @@ async function renderAddPecas() {
   const { dianteiros, traseiros } = agruparPecasPorTipo(pecasExistentes);
   const recebedor = state.colaboradores.find((c) => c.id === rec.colaborador_recebeu_id);
 
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen admin-screen">
       <button class="voltar" id="peca-voltar">‹ Voltar</button>
       <h2 class="titulo-tela">${rec.fornecedor}</h2>
@@ -1286,7 +1304,7 @@ async function renderAddPecas() {
         <button class="botao-concluir-distante" id="btn-concluir-pecas">Concluir por agora</button>
       </div>
     </div>
-  `;
+  `);
   document.getElementById("peca-voltar").addEventListener("click", () => irPara("lote"));
   document.getElementById("btn-concluir-pecas").addEventListener("click", () => { state.recebimentoEmEdicao = null; irPara("lote"); });
 
@@ -1401,13 +1419,13 @@ async function renderRelatorioRecebimento(recebimentoId) {
     `;
   }
 
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen relatorio-print-area" style="max-width:850px; width:100%; margin:20px auto; background:#ffffff; color:#1E2422; padding:24px; border-radius:16px; border:1px solid #DADFDC; box-shadow:0 4px 12px rgba(0,0,0,0.05); height:auto !important; min-height:auto !important;">
       
       <!-- Botões de topo -->
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;" class="no-print">
-        <button class="voltar" onclick="irPara('lote')" style="margin:0; cursor:pointer;">‹ Voltar</button>
-        <button onclick="window.print()" class="botao-grande botao-confirmar" style="width:auto; padding:10px 20px; font-size:15px; margin:0; cursor:pointer;">
+        <button class="voltar" data-test-action="voltar-lote" style="margin:0; cursor:pointer;">‹ Voltar</button>
+        <button data-test-action="imprimir" class="botao-grande botao-confirmar" style="width:auto; padding:10px 20px; font-size:15px; margin:0; cursor:pointer;">
           🖨️ Imprimir / Salvar PDF
         </button>
       </div>
@@ -1444,21 +1462,24 @@ async function renderRelatorioRecebimento(recebimentoId) {
       </div>
 
     </div>
-  `;
+  `);
 }
 
 // ---------- Área do gestor (admin) ----------
 let adminAutenticado = false;
 let abaAdminAtual = "cortes";
 
-function renderAdmin() {
+async function renderAdmin() {
   nav.classList.add("hidden");
-  if (!adminAutenticado) return renderAdminLogin();
+  if (!adminAutenticado) {
+    try { const s = await sessaoAPI(null,"GET"); adminAutenticado = s.role === "gestor"; } catch {}
+    if (!adminAutenticado) return renderAdminLogin();
+  }
   renderAdminShell();
 }
 
 function renderAdminLogin() {
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen pin-screen">
       <button class="voltar" id="admin-voltar">‹ Voltar</button>
       <h2 class="pin-nome">Área do gestor</h2>
@@ -1466,20 +1487,19 @@ function renderAdminLogin() {
       <input type="password" id="admin-senha" class="select-grande" />
       <button class="botao-grande botao-confirmar" id="admin-entrar">Entrar</button>
     </div>
-  `;
+  `);
   document.getElementById("admin-voltar").addEventListener("click", () => irPara("login"));
-  document.getElementById("admin-entrar").addEventListener("click", () => {
-    if (document.getElementById("admin-senha").value === APP_CONFIG.ADMIN_PASSWORD) {
+  document.getElementById("admin-entrar").addEventListener("click", async () => {
+    try {
+      await sessaoAPI({ adminPassword: document.getElementById("admin-senha").value });
       adminAutenticado = true;
       renderAdminShell();
-    } else {
-      alert("Senha incorreta.");
-    }
+    } catch (err) { alert(err.message); }
   });
 }
 
 function renderAdminShell() {
-  el.innerHTML = `
+  el.innerHTML = sanitizarHTML(`
     <div class="screen admin-screen">
       <header class="admin-topo">
         <h2>Área do gestor</h2>
@@ -1493,26 +1513,28 @@ function renderAdminShell() {
         <button class="aba ${abaAdminAtual === "cortes" ? "ativa" : ""}" data-aba="cortes">Cortes</button>
         <button class="aba ${abaAdminAtual === "colaboradores" ? "ativa" : ""}" data-aba="colaboradores">Colaboradores</button>
         <button class="aba ${abaAdminAtual === "pecas" ? "ativa" : ""}" data-aba="pecas">Recebimentos</button>
+        <button class="aba ${abaAdminAtual === "auditoria" ? "ativa" : ""}" data-aba="auditoria">Auditoria do banco</button>
         <button class="aba ${abaAdminAtual === "logs" ? "ativa" : ""}" data-aba="logs">Logs</button>
       </div>
       <div id="admin-conteudo"></div>
     </div>
-  `;
-  document.getElementById("admin-sair").addEventListener("click", () => { adminAutenticado = false; irPara("login"); });
+  `);
+  document.getElementById("admin-sair").addEventListener("click", async () => { await sessaoAPI(null, "DELETE"); adminAutenticado = false; irPara("login"); });
   el.querySelectorAll(".aba").forEach((b) => b.addEventListener("click", () => { abaAdminAtual = b.dataset.aba; renderAdminShell(); }));
 
   if (abaAdminAtual === "cortes") renderAdminCortes();
   if (abaAdminAtual === "colaboradores") renderAdminColaboradores();
   if (abaAdminAtual === "pecas") renderAdminPecas();
   if (abaAdminAtual === "logs") renderAdminLogs();
+  if (abaAdminAtual === "auditoria") renderAuditoria();
 }
 
 async function renderAdminLogs() {
   const c = document.getElementById("admin-conteudo");
-  c.innerHTML = `<p class="pin-label">Carregando…</p>`;
+  c.innerHTML = sanitizarHTML(`<p class="pin-label">Carregando…</p>`);
   const logs = await listarLogs();
   const corPorNivel = { erro: "#A8402B", sucesso: "#4C7A57", info: "#375061" };
-  c.innerHTML = `
+  c.innerHTML = sanitizarHTML(`
     <div style="display:flex; gap:8px; margin-bottom:14px;">
       <button class="botao-secundario" id="btn-copiar-logs">📋 Copiar tudo</button>
       <button class="botao-secundario" id="btn-limpar-logs">🗑️ Limpar</button>
@@ -1529,7 +1551,7 @@ async function renderAdminLogs() {
         </li>
       `).join("") || '<li><span>Nenhum log ainda.</span></li>'}
     </ul>
-  `;
+  `);
   document.getElementById("btn-copiar-logs").addEventListener("click", async () => {
     const texto = logs.map((l) => `[${l.quando}] ${l.nivel.toUpperCase()} — ${l.mensagem}${l.detalhes ? " — " + l.detalhes : ""}`).join("\n");
     try {
@@ -1550,11 +1572,11 @@ let corteEmEdicaoCodigo = null;
 
 async function renderAdminCortes() {
   const c = document.getElementById("admin-conteudo");
-  c.innerHTML = `<p class="pin-label">Carregando…</p>`;
+  c.innerHTML = sanitizarHTML(`<p class="pin-label">Carregando…</p>`);
   const todos = await buscarTodosCortes();
   const editando = corteEmEdicaoCodigo ? todos.find((ct) => ct.codigo === corteEmEdicaoCodigo) : null;
 
-  c.innerHTML = `
+  c.innerHTML = sanitizarHTML(`
     <form id="form-corte" class="admin-form">
       <input name="codigo" placeholder="Código (da etiqueta)" value="${editando ? editando.codigo : ""}" ${editando ? "readonly" : ""} required />
       <input name="nome" placeholder="Nome do corte" value="${editando ? editando.nome : ""}" required />
@@ -1578,7 +1600,7 @@ async function renderAdminCortes() {
           </div>
         </li>`).join("") || '<li><span>Nenhum corte cadastrado ainda.</span></li>'}
     </ul>
-  `;
+  `);
 
   document.getElementById("busca-corte-admin").addEventListener("input", (e) => {
     const termo = e.target.value;
@@ -1638,11 +1660,11 @@ let colaboradorEmEdicaoId = null;
 
 async function renderAdminColaboradores() {
   const c = document.getElementById("admin-conteudo");
-  c.innerHTML = `<p class="pin-label">Carregando…</p>`;
+  c.innerHTML = sanitizarHTML(`<p class="pin-label">Carregando…</p>`);
   const todos = await buscarTodosColaboradores();
   const editando = colaboradorEmEdicaoId ? todos.find((cl) => cl.id === colaboradorEmEdicaoId) : null;
 
-  c.innerHTML = `
+  c.innerHTML = sanitizarHTML(`
     <form id="form-colab" class="admin-form">
       <input name="nome" placeholder="Nome do colaborador" value="${editando ? editando.nome : ""}" required />
       ${editando && editando.foto_url ? `<img src="${editando.foto_url}" class="foto-preview-atual" alt="Foto atual" />` : ""}
@@ -1676,7 +1698,7 @@ async function renderAdminColaboradores() {
           </div>
         </li>`).join("") || '<li><span>Nenhum colaborador cadastrado ainda.</span></li>'}
     </ul>
-  `;
+  `);
 
   let fotoSelecionada = null;
   const inputCamera = document.getElementById("input-foto-camera");
@@ -1772,7 +1794,7 @@ let abaGestorRecebimento = "abertos";
 
 async function renderAdminPecas() {
   const c = document.getElementById("admin-conteudo");
-  c.innerHTML = `<p class="pin-label">Carregando…</p>`;
+  c.innerHTML = sanitizarHTML(`<p class="pin-label">Carregando…</p>`);
   
   if (!mesFiltroAdmin) {
     const hoje = new Date();
@@ -1801,7 +1823,7 @@ async function renderAdminPecas() {
   const listaExibir = abaGestorRecebimento === "abertos" ? abertos : concluidos;
   const nomeMes = new Date(`${mesFiltroAdmin}-01T00:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 
-  c.innerHTML = `
+  c.innerHTML = sanitizarHTML(`
     <div class="filtro-mes">
       <button id="mes-anterior" class="botao-secundario">‹</button>
       <strong class="filtro-mes-nome">${nomeMes}</strong>
@@ -1863,7 +1885,7 @@ async function renderAdminPecas() {
           </li>`;
       }).join("") || '<p class="empty-msg">Nenhum recebimento nesta aba.</p>'}
     </ul>
-  `;
+  `);
 
   // Lógica das Abas do Gestor
   document.getElementById("aba-gestor-abertos").addEventListener("click", () => { abaGestorRecebimento = "abertos"; renderAdminPecas(); });
@@ -1951,10 +1973,7 @@ function atualizarBannerOffline() {
 }
 
 async function registrarSincronizacaoSegundoPlano() {
-  if ('serviceWorker' in navigator && 'SyncManager' in window) {
-    const reg = await navigator.serviceWorker.ready;
-    await reg.sync.register('sincronizar-fila-desossa');
-  }
+  // Sem execução autônoma por service worker no ambiente de testes.
 }
 
 // ---------- Bootstrap ----------
@@ -1964,9 +1983,14 @@ async function bootstrap() {
   state.usuario = null;
   state.loteAtivo = null;
 
-  const online = await atualizarCacheReferencia();
+  let online = false;
+  try {
+    const acesso = await sessaoAPI(null, "GET");
+    await idbClearReplace(STORES.colaboradores, acesso.colaboradores);
+    online = true;
+  } catch (erro) { state.erroInicial = erro.message; mostrarToast(erro.message); }
   if (!online) {
-    mostrarToast("Sem internet — usando dados salvos no aparelho");
+    mostrarToast("Sem conexão — pendências preservadas. Login exige conexão.");
   }
   state.colaboradores = await idbGetAll(STORES.colaboradores);
   state.cortes = await idbGetAll(STORES.cortes);
@@ -1994,4 +2018,19 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
 
-bootstrap();
+try { validarConfiguracaoTeste(); bootstrap(); } catch (erro) { console.warn(erro.message); }
+
+async function renderAuditoria() {
+  const container=document.getElementById('admin-conteudo');
+  container.textContent='Carregando os 100 eventos mais recentes…';
+  const {data,error}=await getSupabase().from('auditoria_eventos').select('id,tabela,registro_id,operacao,antes,depois,ator,criado_em').order('criado_em',{ascending:false}).limit(100);
+  if(error){container.textContent='Auditoria indisponível: '+error.message;return;}
+  container.replaceChildren();
+  for(const evento of data){
+    const detalhe=document.createElement('details'),resumo=document.createElement('summary'),texto=document.createElement('pre');
+    resumo.textContent=`${new Date(evento.criado_em).toLocaleString('pt-BR')} — ${evento.tabela} — ${evento.operacao}`;
+    texto.textContent=JSON.stringify(evento,null,2);texto.style.whiteSpace='pre-wrap';
+    detalhe.append(resumo,texto);container.append(detalhe);
+  }
+  if(!data.length)container.textContent='Nenhum evento de auditoria.';
+}

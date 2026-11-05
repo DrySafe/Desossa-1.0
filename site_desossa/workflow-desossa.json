@@ -1,35 +1,38 @@
 {
-  "name": "Desossa - Espelhar no Sheets",
+  "name": "LEGADO — DESATIVADO — não usar nos testes",
   "nodes": [
     {
       "parameters": {
-        "rule": {
-          "interval": [{ "field": "minutes", "minutesInterval": 2 }]
-        }
-      },
-      "id": "agendamento",
-      "name": "A cada 2 minutos",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [200, 300]
-    },
-    {
-      "parameters": {
         "method": "GET",
-        "url": "={{$env.SUPABASE_URL}}/rest/v1/vw_lancamentos_detalhado",
+        "url": "https://dkiyakjftqcbbnfrgnmh.supabase.co/rest/v1/vw_lancamentos_detalhado",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "sheets_sincronizado_em", "value": "is.null" },
-            { "name": "order", "value": "criado_em.asc" },
-            { "name": "limit", "value": "200" }
+            {
+              "name": "sheets_sincronizado_em",
+              "value": "is.null"
+            },
+            {
+              "name": "order",
+              "value": "criado_em.asc"
+            },
+            {
+              "name": "limit",
+              "value": "200"
+            }
           ]
         },
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}" },
-            { "name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}" }
+            {
+              "name": "apikey",
+              "value": "={{$env.DESOSSA_TEST_SERVICE_ROLE_KEY}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.DESOSSA_TEST_SERVICE_ROLE_KEY}}"
+            }
           ]
         },
         "options": {}
@@ -38,7 +41,10 @@
       "name": "Buscar Lançamentos Pendentes",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [440, 300]
+      "position": [
+        440,
+        300
+      ]
     },
     {
       "parameters": {
@@ -49,7 +55,10 @@
       "name": "Um de Cada Vez",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [680, 300]
+      "position": [
+        680,
+        300
+      ]
     },
     {
       "parameters": {
@@ -85,7 +94,10 @@
       "name": "Escrever no Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [900, 220],
+      "position": [
+        900,
+        220
+      ],
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "CONFIGURE_NA_UI_DO_N8N",
@@ -96,13 +108,22 @@
     {
       "parameters": {
         "method": "PATCH",
-        "url": "={{$env.SUPABASE_URL}}/rest/v1/lancamentos?id=eq.{{$json.id}}",
+        "url": "https://dkiyakjftqcbbnfrgnmh.supabase.co/rest/v1/lancamentos?id=eq.{{$json.id}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}" },
-            { "name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}" },
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "apikey",
+              "value": "={{$env.DESOSSA_TEST_SERVICE_ROLE_KEY}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.DESOSSA_TEST_SERVICE_ROLE_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
@@ -114,27 +135,57 @@
       "name": "Marcar Como Espelhado",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1140, 220]
+      "position": [
+        1140,
+        220
+      ]
     }
   ],
   "connections": {
-    "A cada 2 minutos": {
-      "main": [[{ "node": "Buscar Lançamentos Pendentes", "type": "main", "index": 0 }]]
-    },
     "Buscar Lançamentos Pendentes": {
-      "main": [[{ "node": "Um de Cada Vez", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Um de Cada Vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Um de Cada Vez": {
       "main": [
         [],
-        [{ "node": "Escrever no Google Sheets", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Escrever no Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Escrever no Google Sheets": {
-      "main": [[{ "node": "Marcar Como Espelhado", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Marcar Como Espelhado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Marcar Como Espelhado": {
-      "main": [[{ "node": "Um de Cada Vez", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Um de Cada Vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,

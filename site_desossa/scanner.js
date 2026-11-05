@@ -12,6 +12,9 @@ let scannerCanvas = null; // Canvas auxiliar para recortar a mira
 let scannerStream = null;
 let scannerTrack = null;
 let barcodeDetector = null;
+let leitorAlternativo = null;
+let controlesAlternativos = null;
+let scannerTimeoutId = null;
 
 let scannerRodando = false;
 let scannerFrame = null;
@@ -26,7 +29,7 @@ const SCANNER_CONFIG = {
     largura: 1920,
     altura: 1080,
     fps: 30,
-    debug: true
+    debug: false
 };
 
 function scannerLog(...msg){
@@ -41,7 +44,7 @@ function scannerErro(...msg){
 
 function suportaScanner(){
     return (
-        "BarcodeDetector" in window &&
+        ("BarcodeDetector" in window || window.ZXingBrowser) &&
         navigator.mediaDevices &&
         navigator.mediaDevices.getUserMedia
     );
@@ -64,6 +67,21 @@ async function iniciarScanner(videoId, callback){
         scannerCanvas = document.createElement("canvas");
     }
 
+    const nativo = "BarcodeDetector" in window && (!BarcodeDetector.getSupportedFormats || (await BarcodeDetector.getSupportedFormats()).includes("ean_13"));
+    if (!nativo) {
+        if (!window.ZXingBrowser) throw new Error("Leitor alternativo indisponível. Use a entrada manual.");
+        leitorAlternativo = new ZXingBrowser.BrowserMultiFormatReader();
+        try {
+            controlesAlternativos = await leitorAlternativo.decodeFromConstraints({ audio: false, video: { facingMode: { ideal: "environment" } } }, scannerVideo,
+                result => { if (result && scannerRodando) processarCodigo(result.getText(), callback); });
+            scannerRodando = true;
+            scannerTimeoutId = setTimeout(() => pararScanner(), SCANNER_CONFIG.timeout);
+            scannerStream = scannerVideo.srcObject;
+            scannerTrack = scannerStream?.getVideoTracks()[0];
+            return;
+        } catch (err) { await pararScanner(); throw err; }
+    }
+    try {
     scannerStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
@@ -86,6 +104,7 @@ async function iniciarScanner(videoId, callback){
     scannerLog("Scanner iniciado com recorte de mira central.");
 
     iniciarLoop(callback);
+    } catch (err) { await pararScanner(); throw err; }
 }
 
 // =========================================================
@@ -126,6 +145,7 @@ function iniciarLoop(callback){
                 // Passa APENAS o canvas cortado para o leitor de código de barras
                 const resultados = await barcodeDetector.detect(scannerCanvas);
 
+                if (!scannerRodando) return;
                 if(resultados.length){
                     for (const res of resultados) {
                         if (res.rawValue) {
@@ -145,7 +165,7 @@ function iniciarLoop(callback){
             return;
         }
 
-        scannerFrame = requestAnimationFrame(loop);
+        if (scannerRodando) scannerFrame = requestAnimationFrame(loop);
     }
 
     loop();
@@ -160,6 +180,7 @@ const INTERVALO_ENTRE_LEITURAS_MS = 800; // Tempo mínimo (ms) entre a leitura d
 
 function processarCodigo(codigo, callback) {
     const agora = Date.now();
+    if (codigo === ultimoCodigo && agora - ultimoTempo < SCANNER_CONFIG.repetirApos) return;
 
     // Trava 1: Ignora leituras em sequência muito rápida para evitar ruído de quadros borrados
     if (agora - ultimoTempoLeituraGlobal < INTERVALO_ENTRE_LEITURAS_MS) {
@@ -218,6 +239,9 @@ function validarEAN13(codigo) {
 
 async function pararScanner(){
     scannerRodando = false;
+    if (scannerTimeoutId) { clearTimeout(scannerTimeoutId); scannerTimeoutId = null; }
+    if (controlesAlternativos) { controlesAlternativos.stop(); controlesAlternativos = null; }
+    leitorAlternativo = null;
 
     if(scannerFrame){
         cancelAnimationFrame(scannerFrame);
@@ -289,7 +313,7 @@ function decodificarCodigoBarras(texto){
         return null;
     }
 
-    const codigo = digitos.slice(cfg.codigoInicio, cfg.codigoFim).replace(/^0+/,"") || "0";
+    const codigo = digitos.slice(cfg.codigoInicio, cfg.codigoFim);
 
     let peso = null;
     if(cfg.usaPesoEmbutido){
@@ -329,3 +353,13 @@ window.pararScanner = pararScanner;
 window.ligarLanterna = ligarLanterna;
 window.desligarLanterna = desligarLanterna;
 window.definirZoom = definirZoom;
+function encontrarCortePorCodigo(cortes, codigo) {
+  const exato = cortes.find(c => String(c.codigo) === String(codigo));
+  if (exato) return exato;
+  const normalizar = n => String(n).replace(/^0+/, '') || '0';
+  const candidatos = cortes.filter(c => normalizar(c.codigo) === normalizar(codigo));
+  if (candidatos.length > 1) throw new Error('Código ambíguo no catálogo. Confira o cadastro antes de lançar.');
+  return candidatos[0] || null;
+}
+window.addEventListener('pagehide', () => pararScanner());
+document.addEventListener('visibilitychange', () => { if (document.hidden) pararScanner(); });

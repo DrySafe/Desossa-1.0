@@ -4,7 +4,7 @@
 let supabaseClient = null;
 function getSupabase() {
   if (!supabaseClient) {
-    supabaseClient = supabase.createClient(APP_CONFIG.SUPABASE_URL, APP_CONFIG.SUPABASE_ANON_KEY);
+    supabaseClient = criarClienteTeste();
   }
   return supabaseClient;
 }
@@ -14,39 +14,40 @@ async function sha256Hex(texto) {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// ---------- Baixa dados de referência (colaboradores, catálogo, recebimentos abertos e suas peças) ----------
+// Paginação por chave estável; erros nunca viram uma lista vazia.
+async function buscarTodasPaginas(criarQuery) {
+  const registros = []; let esperado = null;
+  for (let offset = 0; ; offset += 500) {
+    const { data, error, count } = await criarQuery().range(offset, offset + 499);
+    if (error) throw error;
+    if (!Array.isArray(data) || !Number.isInteger(count)) throw new Error("Consulta sem confirmação de total.");
+    if (esperado !== null && esperado !== count) throw new Error("Dados mudaram durante a consulta. Tente novamente.");
+    esperado = count;
+    registros.push(...data);
+    if (registros.length === count) return registros;
+    if (!data.length || registros.length > count) throw new Error("Consulta incompleta.");
+  }
+}
 async function atualizarCacheReferencia() {
   try {
     const sb = getSupabase();
-    const [{ data: colaboradores }, { data: cortes }, { data: recebimentos }] = await Promise.all([
-      sb.from("colaboradores").select("id,nome,foto_url,pin_hash,ativo").eq("ativo", true),
-      sb.from("cortes_catalogo").select("codigo,nome,preco_venda_kg,ativo").eq("ativo", true),
-      sb.from("recebimentos").select("*").order("criado_em", { ascending: false })
+    const [colaboradores, cortes, recebimentos, view] = await Promise.all([
+      buscarTodasPaginas(() => sb.from("colaboradores").select("id,nome,foto_url,ativo,nivel_acesso", { count: "exact" }).eq("ativo", true).order("id")),
+      buscarTodasPaginas(() => sb.from("cortes_catalogo").select("*", { count: "exact" }).eq("ativo", true).order("codigo")),
+      buscarTodasPaginas(() => sb.from("recebimentos").select("*", { count: "exact" }).order("id")),
+      buscarTodasPaginas(() => sb.from("vw_rendimento_lote").select("*", { count: "exact" }).order("lote_id"))
     ]);
-    if (colaboradores) await idbClearReplace(STORES.colaboradores, colaboradores);
-    if (cortes) await idbClearReplace(STORES.cortes, cortes);
-    if (recebimentos) await idbClearReplace(STORES.recebimentos, recebimentos);
-
-    const recebimentosAbertos = (recebimentos || []).filter((r) => r.status === "aberto").map((r) => r.id);
-    if (recebimentosAbertos.length) {
-      const { data: view } = await sb.from("vw_rendimento_lote").select("*").in("recebimento_id", recebimentosAbertos);
-      const lotes = (view || []).map((v) => ({
-        id: v.lote_id,
-        recebimento_id: v.recebimento_id,
-        tipo: v.tipo,
-        numero_peca: v.numero_peca,
-        data_desossa: v.data_desossa,
-        peso_entrada_kg: v.peso_liquido_kg,
-        peso_total_desossado: Number(v.peso_total_desossado || 0)
-      }));
-      if (lotes.length) await idbClearReplace(STORES.lotes, lotes);
-      else await idbClearReplace(STORES.lotes, []);
-    } else {
-      await idbClearReplace(STORES.lotes, []);
-    }
+    const abertos = new Set(recebimentos.filter(r => r.status === "aberto").map(r => r.id));
+    const lotes = view.filter(v => (!v.recebimento_id || abertos.has(v.recebimento_id)) && v.status_lote !== "fechado").map(v => ({
+      id: v.lote_id, recebimento_id: v.recebimento_id, tipo: v.tipo, numero_peca: v.numero_peca, status: v.status_lote,
+      data_desossa: v.data_desossa, peso_entrada_kg: v.peso_liquido_kg,
+      peso_total_desossado: Number(v.peso_total_desossado || 0)
+    }));
+    await idbSubstituirCaches({ [STORES.colaboradores]: colaboradores, [STORES.cortes]: cortes,
+      [STORES.recebimentos]: recebimentos, [STORES.lotes]: lotes });
     return true;
   } catch (err) {
-    console.warn("Não foi possível atualizar cache de referência (provavelmente offline):", err);
+    console.warn("Referências não atualizadas; cache anterior preservado.", err.message);
     return false;
   }
 }
@@ -56,7 +57,7 @@ async function garantirDataDesossa(lote) {
   if (lote.data_desossa) return;
   try {
     const sb = getSupabase();
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
     const { error } = await sb.from("lotes").update({ data_desossa: hoje }).eq("id", lote.id).is("data_desossa", null);
     if (!error) {
       lote.data_desossa = hoje;
@@ -152,12 +153,12 @@ async function buscarTodosColaboradores() {
 }
 
 async function uploadFotoColaborador(arquivo, colaboradorIdOuTemp) {
-  const sb = getSupabase();
-  const extensao = arquivo.name.split(".").pop() || "jpg";
+  if (!['image/jpeg','image/png','image/webp'].includes(arquivo.type) || arquivo.size > 2 * 1024 * 1024) throw new Error('Escolha uma foto JPG, PNG ou WebP de até 2 MB.');
+  const extensao = { 'image/jpeg':'jpg','image/png':'png','image/webp':'webp' }[arquivo.type];
   const caminho = `${colaboradorIdOuTemp}-${Date.now()}.${extensao}`;
-  const { error } = await sb.storage.from("colaboradores").upload(caminho, arquivo, { upsert: true });
-  if (error) throw error;
-  const { data } = sb.storage.from("colaboradores").getPublicUrl(caminho);
+  const resposta = await fetch('/api/photo?name='+encodeURIComponent(caminho), { method:'POST', credentials:'same-origin', headers:{'Content-Type':arquivo.type}, body:arquivo });
+  const data = await resposta.json();
+  if (!resposta.ok) throw new Error(data.message || 'Upload não confirmado.');
   return data.publicUrl;
 }
 
@@ -209,53 +210,28 @@ async function definirAtivoCorte(codigo, ativo) {
 }
 
 // ---------- Exclusão de peça / lançamento (com log de auditoria) ----------
-async function excluirLancamento(lancamentoId, colaboradorId) {
-  const sb = getSupabase();
-  const { data: registro } = await sb.from("lancamentos").select("*").eq("id", lancamentoId).maybeSingle();
-  await sb.from("exclusoes_log").insert({
-    tipo: "lancamento",
-    registro_id: lancamentoId,
-    dados_excluidos: registro,
-    colaborador_id: colaboradorId
-  });
-  const { error } = await sb.from("lancamentos").delete().eq("id", lancamentoId);
-  if (error) throw error;
-  await idbDelete(STORES.lancamentosLote, lancamentoId);
-  await registrarLog("info", "Lançamento de corte excluído", { lancamentoId, colaboradorId, registro });
+async function excluirLancamento(lancamentoId) {
+  const { error } = await getSupabase().rpc('app_excluir', { p_tipo:'lancamento', p_id:lancamentoId });
+  if(error)throw error;
+  await idbDelete(STORES.lancamentosLote,lancamentoId);
 }
-
-async function excluirPeca(loteId, colaboradorId) {
-  const sb = getSupabase();
-  const { data: lote } = await sb.from("lotes").select("*").eq("id", loteId).maybeSingle();
-  const { data: lancamentosDaPeca } = await sb.from("lancamentos").select("*").eq("lote_id", loteId);
-  await sb.from("exclusoes_log").insert({
-    tipo: "peca",
-    registro_id: loteId,
-    dados_excluidos: { lote, lancamentos: lancamentosDaPeca },
-    colaborador_id: colaboradorId
-  });
-  const { error } = await sb.from("lotes").delete().eq("id", loteId);
-  if (error) throw error;
+async function excluirPeca(loteId) {
+  const { error } = await getSupabase().rpc('app_excluir', { p_tipo:'peca', p_id:loteId });
+  if(error)throw error;
   await atualizarCacheReferencia();
-  await registrarLog("info", "Peça excluída (e todos os cortes dela)", { loteId, colaboradorId, lote, lancamentosDaPeca });
 }
 
 // ---------- Histórico de cortes já lançados numa peça (persistente, sobrevive a atualizar a página) ----------
 async function buscarLancamentosDoLote(loteId) {
   try {
     const sb = getSupabase();
-    const { data, error } = await sb.from("vw_lancamentos_detalhado")
-      .select("id,lote_id,corte_nome,peso_kg,preco_venda_kg,venda_total,colaborador_nome,criado_em")
-      .eq("lote_id", loteId)
-      .order("criado_em", { ascending: false })
-      .limit(100);
-    if (error) throw error;
-    for (const registro of data) {
-      await idbPut(STORES.lancamentosLote, { ...registro, pendente: false });
-    }
+    const data = await buscarTodasPaginas(() => sb.from("vw_lancamentos_detalhado")
+      .select("id,lote_id,corte_codigo,corte_nome,peso_kg,preco_venda_kg,venda_total,colaborador_nome,criado_em", { count: "exact" })
+      .eq("lote_id", loteId).order("id"));
+    await idbReconciliarHistorico(loteId, data);
     return data;
   } catch (err) {
-    console.warn("Não deu pra atualizar o histórico de cortes agora (sem internet?):", err);
+    console.warn("Histórico não confirmado; preservado no aparelho.", err.message);
     return null;
   }
 }
@@ -268,81 +244,75 @@ async function lancamentosLocaisDoLote(loteId) {
 // IMPORTANTE: o app grava DIRETO no Supabase. O "sucesso" só é considerado sucesso
 // quando o próprio banco confirma a gravação — nunca antes disso. O n8n entra depois,
 // em segundo plano, só para espelhar no Google Sheets (ver workflow-desossa.json).
-async function enfileirarLancamento(lancamento) {
-  const idLancamento = lancamento.id || crypto.randomUUID(); // gerado no app.js, pra podermos reenviar com segurança
-  const item = {
-    id_local: idLancamento,
-    payload: { ...lancamento, id: idLancamento },
-    tentativas: 0,
-    criado_em: new Date().toISOString()
-  };
-  await idbPut(STORES.fila, item);
-  sincronizarFila(); // tenta gravar na hora; se falhar (ou offline), fica na fila e tenta de novo depois
+async function enfileirarLancamento(lancamento, registroLocal) {
+  const id = lancamento.id || crypto.randomUUID();
+  const item = { id_local: id, payload: { ...lancamento, id }, tentativas: 0, criado_em: new Date().toISOString() };
+  if (!registroLocal) throw new Error("Histórico local obrigatório para salvar com segurança.");
+  await idbSalvarLancamento(item, { ...registroLocal, id, pendente: true });
   return item;
 }
+async function contarFilaPendente() { return (await idbGetAll(STORES.fila)).length; }
 
-async function contarFilaPendente() {
-  const itens = await idbGetAll(STORES.fila);
-  return itens.length;
+function mesmoLancamento(a, b) {
+  if (!a || !b) return false;
+  const texto = ['id', 'lote_id', 'corte_codigo', 'colaborador_id', 'origem'];
+  return texto.every(k => String(a[k]) === String(b[k]))
+    && Number(a.peso_kg) === Number(b.peso_kg)
+    && ((a.preco_venda_kg == null && b.preco_venda_kg == null) || (a.preco_venda_kg != null && b.preco_venda_kg != null && Number(a.preco_venda_kg) === Number(b.preco_venda_kg)));
 }
-
-async function sincronizarFila() {
-  if (!navigator.onLine) return;
-  const itens = await idbGetAll(STORES.fila);
+let sincronizacaoEmCurso = null;
+let sincronizacaoAutorizada = false;
+async function executarSincronizacao() {
+  try { validarConfiguracaoTeste(); } catch { return; }
+  if (!navigator.onLine || !sincronizacaoAutorizada) return;
   const sb = getSupabase();
-  let algumSucesso = false;
-
-  for (const item of itens) {
+  for (const item of await idbGetAll(STORES.fila)) {
     try {
-      // Trava de segurança: se o item da fila estiver corrompido, limpa da fila
-      if (!item || !item.payload || !item.payload.lote_id) {
-        await idbDelete(STORES.fila, item.id_local);
-        continue;
-      }
-
-      // CORREÇÃO: Se a origem veio como "calculado_quebra", altera para "manual"
-      // para passar na validação do Supabase (lancamentos_origem_check)
-      if (item.payload.origem === "calculado_quebra") {
-        item.payload.origem = "manual";
-      }
-
-      const { error } = await sb.from("lancamentos").insert(item.payload);
-      if (error) {
-        // 23505 = Registro já gravado anteriormente -> Remove da fila
-        // 23514 = Erro de validação do banco -> Não será aceito, remove da fila para destravar
-        if (error.code === "23505" || error.code === "23514") {
-          await idbDelete(STORES.fila, item.id_local);
-          await registrarLog("info", `Item removido da fila (código ${error.code})`, item.payload);
-          algumSucesso = true;
-          continue; // Pula para o próximo item da fila
-        }
-        throw error;
-      }
-
+      if (!item || !item.payload || !item.payload.lote_id) throw new Error('Item incompleto; exporte as pendências para recuperação.');
+      if (item.payload.origem === 'calculado_quebra') item.payload.origem = 'manual';
+      const { error } = await sb.from('lancamentos').insert(item.payload);
+      if (error?.code === '23505') {
+        const { data, error: erroConsulta } = await sb.from('lancamentos').select('*').eq('id', item.payload.id).maybeSingle();
+        if (erroConsulta) throw erroConsulta;
+        if (!mesmoLancamento(item.payload, data)) throw new Error('Conflito de identificador; pendência preservada para conferência.');
+      } else if (error) throw error;
+      const registro = await idbGet(STORES.lancamentosLote, item.payload.id);
+      if (registro) await idbPut(STORES.lancamentosLote, { ...registro, pendente: false });
       await idbDelete(STORES.fila, item.id_local);
-      algumSucesso = true;
-
-      const registroLocal = await idbGet(STORES.lancamentosLote, item.payload.id);
-      if (registroLocal) await idbPut(STORES.lancamentosLote, { ...registroLocal, pendente: false });
-
-      await registrarLog("sucesso", "Sincronizado com o Supabase", item.payload);
+      await registrarLog('sucesso', 'Gravação confirmada no banco de testes', { id: item.payload.id });
     } catch (err) {
-      item.tentativas += 1;
-      await idbPut(STORES.fila, item);
-      await registrarLog("erro", "Falha ao gravar no Supabase — vai tentar de novo", {
-        erro: err?.message || String(err), code: err?.code, details: err?.details, hint: err?.hint, payload: item.payload
-      });
-      console.warn("Não gravou no Supabase ainda, vai tentar de novo:", err);
+      if (item?.id_local) await idbPut(STORES.fila, { ...item, tentativas: Number(item.tentativas || 0) + 1,
+        ultimo_erro: err.message || String(err), codigo_erro: err.code || null, ultima_tentativa: new Date().toISOString() });
+      await registrarLog('erro', 'Registro NÃO confirmado; pendência preservada', { id: item?.id_local, erro: err.message, codigo: err.code });
     }
   }
-
-  if (algumSucesso) await atualizarCacheReferencia();
-  if (typeof atualizarBadgePendente === "function") atualizarBadgePendente();
+  if (typeof atualizarBadgePendente === 'function') atualizarBadgePendente();
 }
-
-// Apelido para garantir compatibilidade com o clique manual no celular (app.js)
+function sincronizarFila() {
+  if (sincronizacaoEmCurso) return sincronizacaoEmCurso;
+  const run = () => executarSincronizacao();
+  sincronizacaoEmCurso = (navigator.locks ? navigator.locks.request('desossa-test-sync', run) : run())
+    .finally(() => { sincronizacaoEmCurso = null; });
+  return sincronizacaoEmCurso;
+}
 const tentarEnviarFila = sincronizarFila;
+window.addEventListener('online', () => sincronizarFila().catch(console.warn));
+setInterval(() => sincronizarFila().catch(console.warn), 30000);
 
-// Tenta sincronizar sempre que a conexão voltar
-window.addEventListener("online", () => sincronizarFila());
-setInterval(() => sincronizarFila(), 30000); // tentativa de segurança a cada 30s
+async function cancelarPendencia(id, usuarioId) {
+  const run = async () => {
+    const item = await idbGet(STORES.fila, id);
+    if (!item) return excluirLancamento(id);
+    if (item.payload?.colaborador_id !== usuarioId) throw new Error('Pendência de outro colaborador.');
+    const db = await openDB();
+    await new Promise((resolve,reject) => {
+      const tx = db.transaction([STORES.fila,STORES.lancamentosLote,STORES.logs], 'readwrite');
+      tx.objectStore(STORES.logs).put({id:crypto.randomUUID(),quando:new Date().toISOString(),nivel:'info',mensagem:'Pendência cancelada pelo usuário',detalhes:JSON.stringify({id,usuarioId,payload:item.payload})});
+      tx.objectStore(STORES.fila).delete(id);tx.objectStore(STORES.lancamentosLote).delete(id);
+      tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Cancelamento não confirmado.'));
+    });
+  };
+  if(navigator.locks)return navigator.locks.request('desossa-test-sync',run);
+  if(sincronizacaoEmCurso)await sincronizacaoEmCurso;
+  return run();
+}

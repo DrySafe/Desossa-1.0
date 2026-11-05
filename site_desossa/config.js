@@ -2,13 +2,9 @@
 // CONFIGURAÇÃO — preencha com os dados da sua VPS antes de publicar
 // ============================================================
 const APP_CONFIG = {
-  // URL pública do seu Supabase self-hosted (ex: https://supabase.seudominio.com.br)
-  SUPABASE_URL: "https://nypmvhsxvaqscswszwpr.supabase.co",
-
-  // Chave "anon" do Supabase (Project Settings > API). O app usa essa chave tanto pra
-  // ler dados de referência quanto para GRAVAR os lançamentos diretamente no banco —
-  // a confirmação de sucesso vem do próprio Supabase, nunca de uma camada intermediária.
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55cG12aHN4dmFxc2Nzd3N6d3ByIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MDMyNDUsImV4cCI6MjA5OTI3OTI0NX0.KDvNQiShZ6fD4rpAiWeMYAdP8PXdM0piGjMhZPK9tIA",
+  ENVIRONMENT: "test",
+  SUPABASE_URL: window.DESOSSA_TEST_CONFIG?.SUPABASE_URL || "https://dkiyakjftqcbbnfrgnmh.supabase.co",
+  SUPABASE_ANON_KEY: window.DESOSSA_TEST_CONFIG?.SUPABASE_ANON_KEY || "",
 
   // O n8n NÃO recebe os lançamentos em tempo real (isso mudou de propósito depois de um teste
   // que revelou um problema: o webhook do n8n respondia "recebido" antes de confirmar a gravação
@@ -49,7 +45,67 @@ const APP_CONFIG = {
   // Quantos minutos sem uso até avisar (não desloga sozinho, conforme decidido)
   INATIVIDADE_AVISO_MIN: 5,
 
-  // Senha simples da Área do Gestor (cadastro de cortes, colaboradores e novas peças).
-  // Troque isso antes de publicar. Para mais segurança no futuro, isso pode virar um login de verdade.
-  ADMIN_PASSWORD: "#Eco2186*"
+  // Credenciais de gestor e chave privilegiada permanecem somente no servidor.
+  API_SESSION: "/api/session"
 };
+Object.freeze(APP_CONFIG);
+
+function validarConfiguracaoTeste() {
+  const destino = "https://dkiyakjftqcbbnfrgnmh.supabase.co";
+  if (APP_CONFIG.ENVIRONMENT !== "test" || APP_CONFIG.SUPABASE_URL !== destino) {
+    throw new Error("Configuração bloqueada: apenas o projeto de testes é permitido.");
+  }
+  const chave = APP_CONFIG.SUPABASE_ANON_KEY;
+  if (typeof chave !== "string" || !chave) throw new Error("Configure a chave pública do Supabase de testes.");
+  if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(chave)) {
+    let payload;
+    try { payload = JSON.parse(atob(chave.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); }
+    catch { throw new Error("Use somente uma chave pública do projeto de testes."); }
+    if (payload.role !== "anon" || payload.ref !== "dkiyakjftqcbbnfrgnmh") {
+      throw new Error("Chave bloqueada: papel ou projeto incompatível com testes.");
+    }
+  }
+  return destino;
+}
+
+function criarClienteTeste() {
+  const destino = validarConfiguracaoTeste();
+  return supabase.createClient(destino, APP_CONFIG.SUPABASE_ANON_KEY, {
+    auth: { detectSessionInUrl: false, storageKey: "desossa-test-dkiyakjftqcbbnfrgnmh-auth" },
+    global: {
+      fetch: async (input, init = {}) => {
+        const url = new URL(typeof input === "string" ? input : input.url || String(input));
+        if (url.origin !== destino || url.username || url.password) {
+          return Promise.reject(new Error("Conexão fora do projeto de testes bloqueada."));
+        }
+        if (!url.pathname.startsWith("/rest/v1/")) throw new Error("Endpoint não permitido no cliente.");
+        const headers = {};
+        const origem = new Headers(init.headers || (typeof input === "object" ? input.headers : {}));
+        for (const nome of ["content-type", "prefer", "range", "range-unit"]) if (origem.has(nome)) headers[nome] = origem.get(nome);
+        const method = init.method || input.method || "GET";
+        const body = init.body ?? (typeof input === "object" && !["GET","HEAD"].includes(method) ? await input.clone().text() : undefined);
+        return fetch("/api/database?path=" + encodeURIComponent(url.pathname + url.search), {
+          method, body, headers, redirect: "error", credentials: "same-origin"
+        });
+      }
+    }
+  });
+}
+
+try { validarConfiguracaoTeste(); }
+catch (erro) {
+  window.addEventListener("DOMContentLoaded", () => {
+    document.body.replaceChildren();
+    const mensagem = document.createElement("p");
+    mensagem.textContent = "Ambiente de testes bloqueado: " + erro.message;
+    document.body.appendChild(mensagem);
+  });
+}
+
+async function sessaoAPI(dados, method = "POST") {
+  const resposta = await fetch("/api/session", { method, credentials: "same-origin", redirect: "error",
+    headers: { "Content-Type": "application/json" }, body: method === "GET" || method === "DELETE" ? undefined : JSON.stringify(dados) });
+  const data = await resposta.json();
+  if (!resposta.ok) throw new Error(data.message || "Acesso não confirmado.");
+  return data;
+}

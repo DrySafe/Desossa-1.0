@@ -1,0 +1,10 @@
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const r=require('../site_desossa/relatorios.js');
+const base={peso_liquido_kg:100,peso_carne_kg:80,peso_sebo_osso_kg:10,peso_quebra_kg:10,preco_kg_custo:10,valor_estimado:1602,status_recebimento:'finalizado'};
+test('quebra registrada não desaparece no fechamento',()=>{const p=r.peca(base);assert.equal(p.quebra,10);assert.equal(p.rendimento,80);assert.equal(p.saldo,0);assert.equal(p.custo,1000);assert.equal(p.resultado,602)});
+test('saldo de peça parcial não vira perda',()=>{const p=r.peca({...base,peso_carne_kg:40,peso_quebra_kg:0});assert.equal(p.saldo,50);assert.equal(p.quebra,0)});
+test('custo ausente e preço ausente não viram lucro',()=>{assert.equal(r.peca({...base,preco_kg_custo:null}).resultado,null);assert.equal(r.peca({...base,lancamentos_sem_preco:1}).resultado,null)});
+test('totais ponderados e precisão de gramas',()=>{const p=r.peca(base),q=r.peca({...base,peso_liquido_kg:10,peso_carne_kg:5,peso_sebo_osso_kg:1,peso_quebra_kg:1});const t=r.totais([p,q]);assert.equal(t.rendimento,85/110*100);assert.equal(t.saldo,3)});
+test('valores inválidos impedem relatório',()=>{assert.throws(()=>r.peca({...base,peso_liquido_kg:'x'}));assert.throws(()=>r.peca({...base,peso_liquido_kg:0}))});
+test('CSV neutraliza fórmulas e escapa aspas',()=>{assert.equal(r.campoCSV('=1+1'),'"\'=1+1"');assert.equal(r.campoCSV('a"b'),'"a""b"')});
+test('período e fuso de São Paulo',()=>{assert.equal(r.isoLocal(new Date('2026-11-05T01:00:00Z')),'2026-11-04');assert.equal(r.deslocar('2026-03-01',-1),'2026-02-28')});

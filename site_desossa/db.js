@@ -1,7 +1,7 @@
 // ============================================================
 // DB.js — armazenamento local (IndexedDB), permite o app funcionar sem internet
 // ============================================================
-const DB_NAME = "desossa_db";
+const DB_NAME = "desossa_test_dkiyakjftqcbbnfrgnmh";
 const DB_VERSION = 4;
 
 const STORES = {
@@ -172,4 +172,41 @@ async function listarLogs() {
 async function limparLogs() {
   const todos = await idbGetAll(STORES.logs);
   for (const e of todos) await idbDelete(STORES.logs, e.id);
+}
+
+// Operações relacionadas só são confirmadas quando a transação inteira termina.
+async function idbSalvarLancamento(item, registro) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORES.fila, STORES.lancamentosLote], 'readwrite');
+    tx.objectStore(STORES.fila).put(item);
+    tx.objectStore(STORES.lancamentosLote).put(registro);
+    tx.oncomplete = resolve;
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('Falha ao salvar lançamento.'));
+  });
+}
+async function idbSubstituirCaches(conteudos) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(Object.keys(conteudos), 'readwrite');
+    for (const [nome, registros] of Object.entries(conteudos)) {
+      const store = tx.objectStore(nome); store.clear();
+      registros.forEach(r => store.put(r));
+    }
+    tx.oncomplete = resolve;
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('Falha ao atualizar cache.'));
+  });
+}
+async function idbReconciliarHistorico(loteId, registros) {
+  const antigos = await idbGetAllByIndex(STORES.lancamentosLote, 'lote_id', loteId);
+  const atuais = new Set(registros.map(r => r.id));
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORES.lancamentosLote, 'readwrite');
+    const store = tx.objectStore(STORES.lancamentosLote);
+    antigos.filter(r => !r.pendente && !atuais.has(r.id)).forEach(r => store.delete(r.id));
+    registros.forEach(r => store.put({ ...r, pendente: false }));
+    tx.oncomplete = resolve;
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('Falha ao conciliar histórico.'));
+  });
 }

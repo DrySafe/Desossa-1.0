@@ -1,398 +1,111 @@
-// ============================================================
-// PAINEL-GESTOR.js — dashboard desktop-first pro gestor
-// ============================================================
-let sb = null;
-function getSupabaseClient() {
-  if (!sb) sb = supabase.createClient(APP_CONFIG.SUPABASE_URL, APP_CONFIG.SUPABASE_ANON_KEY);
-  return sb;
+'use strict';
+const estado = { linhas: [], pronto: false, requisicao: 0, ordenar: 'data_referencia', asc: false };
+const $ = id => document.getElementById(id);
+const kg = n => Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' kg';
+const moeda = n => n === null ? 'Pendente' : Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const pct = n => n === null ? '—' : Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%';
+const dataBR = d => d ? String(d).slice(0, 10).split('-').reverse().join('/') : 'Sem data';
+function celula(tr, valor) { const td = document.createElement('td'); td.textContent = valor; tr.append(td); }
+function periodo(dias) {
+  $('data-fim').value = Relatorios.isoLocal();
+  $('data-inicio').value = Relatorios.deslocar($('data-fim').value, -(Math.max(dias, 1) - 1));
 }
-
-const estado = {
-  dataInicio: null,
-  dataFim: null,
-  fornecedor: "",
-  tipo: "",
-  compararAnterior: true,
-  lancamentos: [],
-  pecas: [],
-  lancamentosAnterior: [],
-  pecasAnterior: [],
-  ordenarPor: "data_desossa",
-  ordenarAsc: false
-};
-
-const graficos = {}; // instâncias do Chart.js, pra poder destruir e recriar
-
-function fmtKg(n) { return (Math.round((Number(n || 0) + Number.EPSILON) * 1000) / 1000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
-function fmtR$(n) { return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
-function fmtPct(n) { return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%"; }
-function fmtData(d) { return d ? new Date(d + (String(d).length === 10 ? "T00:00:00" : "")).toLocaleDateString("pt-BR") : "—"; }
-
-// ---------- Portão de senha ----------
-document.getElementById("portao-entrar").addEventListener("click", tentarEntrar);
-document.getElementById("portao-senha").addEventListener("keydown", (e) => { if (e.key === "Enter") tentarEntrar(); });
-function tentarEntrar() {
-  const valor = document.getElementById("portao-senha").value;
-  if (valor === APP_CONFIG.ADMIN_PASSWORD) {
-    document.getElementById("portao").classList.add("hidden");
-    document.getElementById("painel").classList.remove("hidden");
-    iniciar();
-  } else {
-    document.getElementById("portao-erro").classList.remove("hidden");
-  }
+function filtrar() {
+  return estado.linhas.filter(p => (!$('filtro-fornecedor').value || p.fornecedor === $('filtro-fornecedor').value)
+    && (!$('filtro-tipo').value || p.tipo === $('filtro-tipo').value));
 }
-
-// ---------- Inicialização ----------
-function iniciar() {
-  const hoje = new Date();
-  const seteDiasAtras = new Date(hoje); seteDiasAtras.setDate(hoje.getDate() - 6);
-  document.getElementById("data-inicio").value = isoData(seteDiasAtras);
-  document.getElementById("data-fim").value = isoData(hoje);
-  estado.dataInicio = isoData(seteDiasAtras);
-  estado.dataFim = isoData(hoje);
-
-  document.querySelectorAll("#chips-periodo button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("#chips-periodo button").forEach((b) => b.classList.remove("ativo"));
-      btn.classList.add("ativo");
-      const dias = parseInt(btn.dataset.dias, 10);
-      const fim = new Date();
-      const inicio = new Date(); inicio.setDate(fim.getDate() - dias);
-      document.getElementById("data-inicio").value = isoData(inicio);
-      document.getElementById("data-fim").value = isoData(fim);
-      estado.dataInicio = isoData(inicio);
-      estado.dataFim = isoData(fim);
-      carregarDados();
-    });
-  });
-  document.getElementById("data-inicio").addEventListener("change", (e) => { estado.dataInicio = e.target.value; desmarcarChips(); });
-  document.getElementById("data-fim").addEventListener("change", (e) => { estado.dataFim = e.target.value; desmarcarChips(); });
-  document.getElementById("filtro-fornecedor").addEventListener("change", (e) => { estado.fornecedor = e.target.value; carregarDados(); });
-  document.getElementById("filtro-tipo").addEventListener("change", (e) => { estado.tipo = e.target.value; carregarDados(); });
-  document.getElementById("comparar-anterior").addEventListener("change", (e) => { estado.compararAnterior = e.target.checked; carregarDados(); });
-  document.getElementById("btn-atualizar").addEventListener("click", carregarDados);
-  document.getElementById("btn-exportar").addEventListener("click", exportarCSV);
-  document.querySelectorAll("#tabela-pecas th[data-ordenar]").forEach((th) => {
-    th.addEventListener("click", () => {
-      const campo = th.dataset.ordenar;
-      if (estado.ordenarPor === campo) estado.ordenarAsc = !estado.ordenarAsc;
-      else { estado.ordenarPor = campo; estado.ordenarAsc = false; }
-      renderTabelaPecas();
-    });
-  });
-
-  carregarDados();
-}
-
-function desmarcarChips() { document.querySelectorAll("#chips-periodo button").forEach((b) => b.classList.remove("ativo")); }
-function isoData(d) { return d.toISOString().slice(0, 10); }
-function diasEntre(a, b) { return Math.round((new Date(b) - new Date(a)) / 86400000); }
-
-// ---------- Carregamento de dados ----------
 async function carregarDados() {
-  const client = getSupabaseClient();
-  document.getElementById("resumo-periodo").textContent = "Carregando…";
-
-  const fimExclusivo = new Date(estado.dataFim); fimExclusivo.setDate(fimExclusivo.getDate() + 1);
-  const fimExclusivoIso = isoData(fimExclusivo);
-
+  const id = ++estado.requisicao;
+  estado.pronto = false;
+  $('btn-exportar').disabled = true;
+  $('resumo-periodo').textContent = 'Carregando todos os registros do período…';
+  const inicio = $('data-inicio').value, fim = $('data-fim').value;
   try {
-    let qLanc = client.from("vw_lancamentos_detalhado").select("*")
-      .gte("criado_em", estado.dataInicio).lt("criado_em", fimExclusivoIso);
-    let qPecas = client.from("vw_rendimento_lote").select("*")
-      .gte("data_desossa", estado.dataInicio).lt("data_desossa", fimExclusivoIso);
-    if (estado.fornecedor) { qLanc = qLanc.eq("fornecedor", estado.fornecedor); qPecas = qPecas.eq("fornecedor", estado.fornecedor); }
-    if (estado.tipo) { qLanc = qLanc.eq("lote_tipo", estado.tipo); qPecas = qPecas.eq("tipo", estado.tipo); }
-
-    const [{ data: lancamentos }, { data: pecas }] = await Promise.all([qLanc, qPecas]);
-    estado.lancamentos = lancamentos || [];
-    estado.pecas = pecas || [];
-
-    if (estado.compararAnterior) {
-      const nDias = diasEntre(estado.dataInicio, estado.dataFim) + 1;
-      const inicioAnterior = new Date(estado.dataInicio); inicioAnterior.setDate(inicioAnterior.getDate() - nDias);
-      const fimAnterior = new Date(estado.dataInicio);
-      let qLancA = client.from("vw_lancamentos_detalhado").select("*")
-        .gte("criado_em", isoData(inicioAnterior)).lt("criado_em", isoData(fimAnterior));
-      let qPecasA = client.from("vw_rendimento_lote").select("*")
-        .gte("data_desossa", isoData(inicioAnterior)).lt("data_desossa", isoData(fimAnterior));
-      if (estado.fornecedor) { qLancA = qLancA.eq("fornecedor", estado.fornecedor); qPecasA = qPecasA.eq("fornecedor", estado.fornecedor); }
-      if (estado.tipo) { qLancA = qLancA.eq("lote_tipo", estado.tipo); qPecasA = qPecasA.eq("tipo", estado.tipo); }
-      const [{ data: lancA }, { data: pecasA }] = await Promise.all([qLancA, qPecasA]);
-      estado.lancamentosAnterior = lancA || [];
-      estado.pecasAnterior = pecasA || [];
-    } else {
-      estado.lancamentosAnterior = [];
-      estado.pecasAnterior = [];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(inicio) || !/^\d{4}-\d{2}-\d{2}$/.test(fim) || inicio > fim) throw new Error('Informe um período válido.');
+    const client = criarClienteTeste();
+    const linhas = []; let esperado = null;
+    for (let offset = 0; ; offset += 500) {
+      const { data, error, count } = await client.from('vw_relatorio_pecas').select('*', { count: 'exact' })
+        .gte('data_referencia', inicio).lte('data_referencia', fim).order('lote_id').range(offset, offset + 499);
+      if (id !== estado.requisicao) return;
+      if (error) throw error;
+      if (!Array.isArray(data) || !Number.isInteger(count)) throw new Error('Não foi possível confirmar a integridade do relatório.');
+      if (esperado !== null && esperado !== count) throw new Error('Dados mudaram durante a consulta. Atualize novamente.');
+      esperado = count;
+      linhas.push(...data);
+      if (linhas.length === count) break;
+      if (linhas.length > count) throw new Error('Contagem inconsistente.');
+      if (!data.length) throw new Error('Consulta incompleta. Atualize novamente.');
     }
-
-    await preencherFiltroFornecedores(client);
-    document.getElementById("resumo-periodo").textContent =
-      `${fmtData(estado.dataInicio)} até ${fmtData(estado.dataFim)}` +
-      (estado.fornecedor ? ` · ${estado.fornecedor}` : "") +
-      (estado.tipo ? ` · ${estado.tipo === "dianteiro" ? "Dianteiro" : "Traseiro"}` : "");
-    document.getElementById("ultima-atualizacao").textContent = "Atualizado às " + new Date().toLocaleTimeString("pt-BR");
-
-    renderTudo();
+    estado.linhas = linhas.map(Relatorios.peca);
+    const anterior = $('filtro-fornecedor').value;
+    $('filtro-fornecedor').replaceChildren(new Option('Todos', ''));
+    [...new Set(linhas.map(p => p.fornecedor || 'Legado sem recebimento'))].sort().forEach(n => $('filtro-fornecedor').add(new Option(n, n)));
+    $('filtro-fornecedor').value = anterior;
+    estado.pronto = true;
+    $('btn-exportar').disabled = false;
+    $('resumo-periodo').textContent = `${dataBR(inicio)} até ${dataBR(fim)} · por data do recebimento; peças legadas usam a data de entrada disponível.`;
+    $('ultima-atualizacao').textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    renderizar();
   } catch (err) {
-    console.error(err);
-    document.getElementById("resumo-periodo").textContent = "Erro ao carregar dados — confira a conexão.";
+    if (id !== estado.requisicao) return;
+    estado.linhas = [];
+    $('grid-kpi').replaceChildren();
+    $('tabela-pecas').querySelector('tbody').replaceChildren();
+    $('resumo-periodo').textContent = 'Relatório indisponível: ' + (err.message || 'confira a conexão.');
+    $('ultima-atualizacao').textContent = 'Dados não confirmados. Não utilize totais anteriores.';
   }
 }
-
-async function preencherFiltroFornecedores(client) {
-  const select = document.getElementById("filtro-fornecedor");
-  if (select.dataset.carregado) return;
-  const { data } = await client.from("recebimentos").select("fornecedor").order("fornecedor");
-  const nomes = [...new Set((data || []).map((r) => r.fornecedor))];
-  nomes.forEach((n) => { const op = document.createElement("option"); op.value = n; op.textContent = n; select.appendChild(op); });
-  select.dataset.carregado = "1";
-}
-
-// ---------- Cálculo de métricas ----------
-function calcularMetricas(lancamentos, pecas) {
-  const pesoLiquido = pecas.reduce((s, p) => s + Number(p.peso_liquido_kg || 0), 0);
-  const pesoDesossado = pecas.reduce((s, p) => s + Number(p.peso_total_desossado || 0), 0);
-  const quebraKg = pesoLiquido - pesoDesossado;
-  const vendaTotal = lancamentos.reduce((s, l) => s + Number(l.venda_total || 0), 0);
-  const custoTotal = lancamentos.reduce((s, l) => s + Number(l.custo_total || 0), 0);
-  const margemR$ = vendaTotal - custoTotal;
-  return {
-    pesoLiquido, pesoDesossado, quebraKg,
-    rendimentoPct: pesoLiquido ? (pesoDesossado / pesoLiquido) * 100 : 0,
-    quebraPct: pesoLiquido ? (quebraKg / pesoLiquido) * 100 : 0,
-    vendaTotal, custoTotal, margemR$,
-    margemPct: vendaTotal ? (margemR$ / vendaTotal) * 100 : 0,
-    ticketMedio: pesoDesossado ? vendaTotal / pesoDesossado : 0,
-    nPecas: pecas.length,
-    nLancamentos: lancamentos.length,
-    nColaboradores: new Set(lancamentos.map((l) => l.colaborador_nome)).size
-  };
-}
-
-function delta(atual, anterior) {
-  if (!estado.compararAnterior) return null;
-  if (!anterior) return { texto: "sem período anterior", classe: "neutro" };
-  const diff = atual - anterior;
-  const pct = anterior !== 0 ? (diff / Math.abs(anterior)) * 100 : 0;
-  const seta = diff > 0 ? "▲" : diff < 0 ? "▼" : "•";
-  const classe = diff > 0 ? "positivo" : diff < 0 ? "negativo" : "neutro";
-  return { texto: `${seta} ${Math.abs(pct).toFixed(1)}% vs período anterior`, classe };
-}
-
-// ---------- Render geral ----------
-function renderTudo() {
-  const m = calcularMetricas(estado.lancamentos, estado.pecas);
-  const mAnterior = estado.compararAnterior ? calcularMetricas(estado.lancamentosAnterior, estado.pecasAnterior) : null;
-  renderKPIs(m, mAnterior);
-  renderGraficoEvolucao();
-  renderGraficoDianteiroTraseiro();
-  renderGraficoColaboradores();
-  renderGraficoCortes();
-  renderTabelaFornecedores();
-  renderTabelaPecas();
-}
-
-function renderKPIs(m, mA) {
-  const cartoes = [
-    { label: "Rendimento", valor: fmtPct(m.rendimentoPct), delta: mA ? delta(m.rendimentoPct, mA.rendimentoPct) : null, destaque: true },
-    { label: "Margem bruta", valor: fmtPct(m.margemPct), delta: mA ? delta(m.margemPct, mA.margemPct) : null, destaque: true },
-    { label: "Quebra", valor: `${fmtPct(m.quebraPct)} (${fmtKg(m.quebraKg)} kg)`, delta: mA ? delta(mA.quebraPct, m.quebraPct) : null },
-    { label: "Peso líquido recebido", valor: `${fmtKg(m.pesoLiquido)} kg`, delta: mA ? delta(m.pesoLiquido, mA.pesoLiquido) : null },
-    { label: "Peso desossado", valor: `${fmtKg(m.pesoDesossado)} kg`, delta: mA ? delta(m.pesoDesossado, mA.pesoDesossado) : null },
-    { label: "Venda total", valor: fmtR$(m.vendaTotal), delta: mA ? delta(m.vendaTotal, mA.vendaTotal) : null },
-    { label: "Custo total", valor: fmtR$(m.custoTotal), delta: mA ? delta(mA.custoTotal, m.custoTotal) : null },
-    { label: "Lucro bruto", valor: fmtR$(m.margemR$), delta: mA ? delta(m.margemR$, mA.margemR$) : null },
-    { label: "Ticket médio (R$/kg)", valor: fmtR$(m.ticketMedio), delta: mA ? delta(m.ticketMedio, mA.ticketMedio) : null },
-    { label: "Peças processadas", valor: m.nPecas, delta: null },
-    { label: "Lançamentos", valor: m.nLancamentos, delta: null },
-    { label: "Colaboradores ativos", valor: m.nColaboradores, delta: null }
-  ];
-  document.getElementById("grid-kpi").innerHTML = cartoes.map((c) => `
-    <div class="kpi-card ${c.destaque ? "destaque" : ""}">
-      <span class="kpi-label">${c.label}</span>
-      <span class="kpi-valor">${c.valor}</span>
-      ${c.delta ? `<span class="kpi-delta ${c.delta.classe}">${c.delta.texto}</span>` : ""}
-    </div>
-  `).join("");
-}
-
-function destruirGrafico(chave) { if (graficos[chave]) { graficos[chave].destroy(); delete graficos[chave]; } }
-
-function renderGraficoEvolucao() {
-  const porDia = {};
-  estado.lancamentos.forEach((l) => {
-    const dia = String(l.criado_em).slice(0, 10);
-    porDia[dia] = porDia[dia] || { venda: 0, custo: 0 };
-    porDia[dia].venda += Number(l.venda_total || 0);
-    porDia[dia].custo += Number(l.custo_total || 0);
+function renderizar() {
+  if (!estado.pronto) return;
+  const linhas = filtrar(), m = Relatorios.totais(linhas);
+  $('grid-kpi').replaceChildren();
+  for (const [titulo, valor] of [
+    ['Peso líquido recebido', kg(m.entrada)], ['Carne aproveitável', kg(m.carne)],
+    ['Sebo e osso', kg(m.sebo)], ['Perda registrada', kg(m.quebra)],
+    ['Saldo a conferir', kg(m.saldo)], ['Rendimento de carne', pct(m.rendimento)],
+    ['Valor estimado dos cortes', moeda(m.valor)], ['Custo da matéria-prima', moeda(m.custo)],
+    ['Resultado estimado', moeda(m.resultado)]
+  ]) {
+    const card = document.createElement('div'); card.className = 'kpi-card';
+    const label = document.createElement('span'); label.className = 'kpi-label'; label.textContent = titulo;
+    const value = document.createElement('strong'); value.className = 'kpi-valor'; value.textContent = valor;
+    card.append(label, value); $('grid-kpi').append(card);
+  }
+  $('aviso-conferencia').textContent = `${linhas.length} peça(s). ${m.pendentes} com preços/custos pendentes. Valores estimados; peças abertas são provisórias. Saldo a conferir não é perda. Pesos excedidos exigem revisão.`;
+  const tbody = $('tabela-pecas').querySelector('tbody'); tbody.replaceChildren();
+  linhas.sort((a,b) => {
+    const va = a[estado.ordenar] ?? '', vb = b[estado.ordenar] ?? '';
+    const result = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), 'pt-BR', { numeric: true });
+    return estado.asc ? result : -result;
   });
-  const porDiaQuebra = {};
-  estado.pecas.forEach((p) => {
-    const dia = String(p.data_desossa);
-    porDiaQuebra[dia] = porDiaQuebra[dia] || { liquido: 0, desossado: 0 };
-    porDiaQuebra[dia].liquido += Number(p.peso_liquido_kg || 0);
-    porDiaQuebra[dia].desossado += Number(p.peso_total_desossado || 0);
-  });
-  const dias = [...new Set([...Object.keys(porDia), ...Object.keys(porDiaQuebra)])].sort();
-  const margemSerie = dias.map((d) => { const v = porDia[d]; return v && v.venda ? ((v.venda - v.custo) / v.venda) * 100 : null; });
-  const quebraSerie = dias.map((d) => { const v = porDiaQuebra[d]; return v && v.liquido ? ((v.liquido - v.desossado) / v.liquido) * 100 : null; });
-
-  destruirGrafico("evolucao");
-  graficos.evolucao = new Chart(document.getElementById("grafico-evolucao"), {
-    type: "line",
-    data: {
-      labels: dias.map(fmtData),
-      datasets: [
-        { label: "Margem %", data: margemSerie, borderColor: "#4C7A57", backgroundColor: "transparent", tension: 0.3, spanGaps: true },
-        { label: "Quebra %", data: quebraSerie, borderColor: "#A8402B", backgroundColor: "transparent", tension: 0.3, spanGaps: true }
-      ]
-    },
-    options: { responsive: true, interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "bottom" } } }
-  });
+  for (const p of linhas) {
+    const tr = document.createElement('tr');
+    for (const v of [p.fornecedor, p.tipo, p.numero_peca ?? '—', dataBR(p.data_referencia), kg(p.entrada), kg(p.carne), kg(p.sebo), kg(p.quebra), kg(p.saldo), moeda(p.valor), moeda(p.custo), p.statusConferencia + (p.provisorio ? ' · provisório' : '')]) celula(tr, v);
+    tbody.append(tr);
+  }
+  if (!linhas.length) { const tr=document.createElement('tr'); celula(tr,'Nenhuma peça no período.'); tbody.append(tr); }
 }
-
-function renderGraficoDianteiroTraseiro() {
-  const grupos = { dianteiro: { liquido: 0, desossado: 0, venda: 0, custo: 0 }, traseiro: { liquido: 0, desossado: 0, venda: 0, custo: 0 } };
-  estado.pecas.forEach((p) => { const g = grupos[p.tipo]; if (g) { g.liquido += Number(p.peso_liquido_kg || 0); g.desossado += Number(p.peso_total_desossado || 0); } });
-  estado.lancamentos.forEach((l) => { const g = grupos[l.lote_tipo]; if (g) { g.venda += Number(l.venda_total || 0); g.custo += Number(l.custo_total || 0); } });
-  const rendimento = ["dianteiro", "traseiro"].map((t) => grupos[t].liquido ? (grupos[t].desossado / grupos[t].liquido) * 100 : 0);
-  const margem = ["dianteiro", "traseiro"].map((t) => grupos[t].venda ? ((grupos[t].venda - grupos[t].custo) / grupos[t].venda) * 100 : 0);
-
-  destruirGrafico("dianteiroTraseiro");
-  graficos.dianteiroTraseiro = new Chart(document.getElementById("grafico-dianteiro-traseiro"), {
-    type: "bar",
-    data: {
-      labels: ["Dianteiro", "Traseiro"],
-      datasets: [
-        { label: "Rendimento %", data: rendimento, backgroundColor: "#375061" },
-        { label: "Margem %", data: margem, backgroundColor: "#A8402B" }
-      ]
-    },
-    options: { plugins: { legend: { position: "bottom" } } }
-  });
-}
-
-function renderGraficoColaboradores() {
-  const porColab = {};
-  estado.lancamentos.forEach((l) => { porColab[l.colaborador_nome] = (porColab[l.colaborador_nome] || 0) + Number(l.peso_kg || 0); });
-  const nomes = Object.keys(porColab).sort((a, b) => porColab[b] - porColab[a]).slice(0, 10);
-
-  destruirGrafico("colaboradores");
-  graficos.colaboradores = new Chart(document.getElementById("grafico-colaboradores"), {
-    type: "bar",
-    data: { labels: nomes, datasets: [{ label: "Kg lançado", data: nomes.map((n) => porColab[n]), backgroundColor: "#4C7A57" }] },
-    options: { indexAxis: "y", plugins: { legend: { display: false } } }
-  });
-}
-
-function renderGraficoCortes() {
-  const porCorte = {};
-  estado.lancamentos.forEach((l) => { porCorte[l.corte_nome] = (porCorte[l.corte_nome] || 0) + Number(l.peso_kg || 0); });
-  const nomes = Object.keys(porCorte).sort((a, b) => porCorte[b] - porCorte[a]).slice(0, 14);
-
-  destruirGrafico("cortes");
-  graficos.cortes = new Chart(document.getElementById("grafico-cortes"), {
-    type: "bar",
-    data: { labels: nomes, datasets: [{ label: "Kg", data: nomes.map((n) => porCorte[n]), backgroundColor: "#A8402B" }] },
-    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { autoSkip: false, maxRotation: 60, minRotation: 60 } } } }
-  });
-}
-
-function renderTabelaFornecedores() {
-  const porFornecedor = {};
-  estado.pecas.forEach((p) => {
-    porFornecedor[p.fornecedor] = porFornecedor[p.fornecedor] || { pecas: 0, liquido: 0, desossado: 0 };
-    porFornecedor[p.fornecedor].pecas += 1;
-    porFornecedor[p.fornecedor].liquido += Number(p.peso_liquido_kg || 0);
-    porFornecedor[p.fornecedor].desossado += Number(p.peso_total_desossado || 0);
-  });
-  const vendaCustoPorFornecedor = {};
-  estado.lancamentos.forEach((l) => {
-    vendaCustoPorFornecedor[l.fornecedor] = vendaCustoPorFornecedor[l.fornecedor] || { venda: 0, custo: 0 };
-    vendaCustoPorFornecedor[l.fornecedor].venda += Number(l.venda_total || 0);
-    vendaCustoPorFornecedor[l.fornecedor].custo += Number(l.custo_total || 0);
-  });
-
-  const linhas = Object.keys(porFornecedor).map((f) => {
-    const d = porFornecedor[f];
-    const vc = vendaCustoPorFornecedor[f] || { venda: 0, custo: 0 };
-    const rendimento = d.liquido ? (d.desossado / d.liquido) * 100 : 0;
-    const quebra = d.liquido ? ((d.liquido - d.desossado) / d.liquido) * 100 : 0;
-    const margem = vc.venda ? ((vc.venda - vc.custo) / vc.venda) * 100 : 0;
-    return { fornecedor: f, pecas: d.pecas, liquido: d.liquido, rendimento, quebra, margem };
-  }).sort((a, b) => b.liquido - a.liquido);
-
-  document.querySelector("#tabela-fornecedores tbody").innerHTML = linhas.map((l) => `
-    <tr>
-      <td>${l.fornecedor}</td>
-      <td>${l.pecas}</td>
-      <td>${fmtKg(l.liquido)} kg</td>
-      <td>${fmtPct(l.rendimento)}</td>
-      <td>${fmtPct(l.quebra)}</td>
-      <td>${fmtPct(l.margem)}</td>
-    </tr>
-  `).join("") || `<tr><td colspan="6">Nenhum dado no período.</td></tr>`;
-}
-
-function renderTabelaPecas() {
-  const vendaCustoPorLote = {};
-  estado.lancamentos.forEach((l) => {
-    vendaCustoPorLote[l.lote_id] = vendaCustoPorLote[l.lote_id] || { venda: 0, custo: 0 };
-    vendaCustoPorLote[l.lote_id].venda += Number(l.venda_total || 0);
-    vendaCustoPorLote[l.lote_id].custo += Number(l.custo_total || 0);
-  });
-
-  let linhas = estado.pecas.map((p) => {
-    const vc = vendaCustoPorLote[p.lote_id] || { venda: 0, custo: 0 };
-    const quebra_pct = p.peso_liquido_kg ? ((p.peso_liquido_kg - p.peso_total_desossado) / p.peso_liquido_kg) * 100 : 0;
-    const margem_pct = vc.venda ? ((vc.venda - vc.custo) / vc.venda) * 100 : 0;
-    const completa = Math.abs(Number(p.peso_total_desossado || 0) - Number(p.peso_liquido_kg || 0)) < 0.001;
-    return { ...p, quebra_pct, margem_pct, completa };
-  });
-
-  linhas.sort((a, b) => {
-    const campo = estado.ordenarPor;
-    let va = a[campo], vb = b[campo];
-    if (typeof va === "string") { va = va || ""; vb = vb || ""; return estado.ordenarAsc ? va.localeCompare(vb) : vb.localeCompare(va); }
-    va = Number(va || 0); vb = Number(vb || 0);
-    return estado.ordenarAsc ? va - vb : vb - va;
-  });
-
-  document.querySelector("#tabela-pecas tbody").innerHTML = linhas.map((p) => `
-    <tr>
-      <td>${p.fornecedor}</td>
-      <td>${p.tipo === "dianteiro" ? "Dianteiro" : "Traseiro"}</td>
-      <td>${p.numero_peca}</td>
-      <td>${fmtData(p.data_desossa)}</td>
-      <td>${fmtKg(p.peso_liquido_kg)} kg</td>
-      <td>${fmtKg(p.peso_total_desossado)} kg</td>
-      <td>${fmtPct(p.quebra_pct)}</td>
-      <td>${fmtPct(p.margem_pct)}</td>
-      <td>${p.completa
-        ? '<span class="selo selo-completa">Completa</span>'
-        : p.quebra_pct > 8
-          ? '<span class="selo selo-alerta">Quebra alta</span>'
-          : '<span class="selo selo-andamento">Em andamento</span>'}</td>
-    </tr>
-  `).join("") || `<tr><td colspan="9">Nenhuma peça no período.</td></tr>`;
-}
-
-// ---------- Exportar CSV ----------
 function exportarCSV() {
-  const linhas = [["Fornecedor", "Tipo", "Peça", "Data desossa", "Peso líquido kg", "Peso desossado kg", "Quebra %", "Margem %"]];
-  estado.pecas.forEach((p) => {
-    const vc = estado.lancamentos.filter((l) => l.lote_id === p.lote_id)
-      .reduce((acc, l) => ({ venda: acc.venda + Number(l.venda_total || 0), custo: acc.custo + Number(l.custo_total || 0) }), { venda: 0, custo: 0 });
-    const quebra_pct = p.peso_liquido_kg ? ((p.peso_liquido_kg - p.peso_total_desossado) / p.peso_liquido_kg) * 100 : 0;
-    const margem_pct = vc.venda ? ((vc.venda - vc.custo) / vc.venda) * 100 : 0;
-    linhas.push([p.fornecedor, p.tipo, p.numero_peca, p.data_desossa, p.peso_liquido_kg, p.peso_total_desossado, quebra_pct.toFixed(1), margem_pct.toFixed(1)]);
-  });
-  const csv = linhas.map((l) => l.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `desossa-pecas-${estado.dataInicio}-a-${estado.dataFim}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  if (!estado.pronto) return;
+  const linhas = [['Fornecedor','Tipo','Peça','Data referência','Líquido kg','Carne kg','Sebo e osso kg','Perda registrada kg','Saldo kg','Valor estimado R$','Custo R$','Status'],
+    ...filtrar().map(p => [p.fornecedor,p.tipo,p.numero_peca,p.data_referencia,p.entrada,p.carne,p.sebo,p.quebra,p.saldo,p.valor,p.custo,p.statusConferencia])];
+  const csv = linhas.map(l => l.map(Relatorios.campoCSV).join(';')).join('\r\n');
+  const url = URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download=`desossa-testes-${$('data-inicio').value}-${$('data-fim').value}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+async function entrar() {
+  try {
+    await sessaoAPI({ adminPassword: $('portao-senha').value });
+    $('portao-senha').value=''; $('portao').classList.add('hidden'); $('painel').classList.remove('hidden'); carregarDados();
+  } catch (err) { $('portao-erro').textContent=err.message; $('portao-erro').classList.remove('hidden'); }
+}
+periodo(7);
+$('portao-entrar').addEventListener('click',entrar);
+$('portao-senha').addEventListener('keydown',e=>{if(e.key==='Enter')entrar()});
+$('btn-atualizar').addEventListener('click',carregarDados);
+$('btn-exportar').addEventListener('click',exportarCSV);
+for(const id of ['data-inicio','data-fim']) $(id).addEventListener('change',carregarDados);
+for(const id of ['filtro-fornecedor','filtro-tipo']) $(id).addEventListener('change',renderizar);
+document.querySelectorAll('[data-dias]').forEach(b=>b.addEventListener('click',()=>{periodo(Number(b.dataset.dias));carregarDados()}));
+document.querySelectorAll('[data-ordenar]').forEach(th=>th.addEventListener('click',()=>{estado.asc=estado.ordenar===th.dataset.ordenar?!estado.asc:true;estado.ordenar=th.dataset.ordenar;renderizar()}));

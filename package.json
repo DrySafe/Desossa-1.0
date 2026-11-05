@@ -1,0 +1,14 @@
+{
+  "name": "desossa-testes-isolados",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build-test-config.cjs",
+    "test": "node scripts/run-tests.cjs",
+    "test:browser": "node tests/browser.cjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.15",
+    "playwright": "1.62.1"
+  }
+}

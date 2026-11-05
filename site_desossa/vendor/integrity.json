@@ -1,0 +1,20 @@
+[
+  {
+    "package": "@supabase/supabase-js",
+    "version": "2.119.0",
+    "file": "supabase-2.119.0.js",
+    "sha256": "a867edbcfb029370aeec7223dd6180b560b621fbe3bc64c6584fb0369d1b7bce"
+  },
+  {
+    "package": "dompurify",
+    "version": "3.4.17",
+    "file": "purify-3.4.17.js",
+    "sha256": "cd37898f9782adf54820c413191b5691803f0f137c799d6edcfd38523b4c2c31"
+  },
+  {
+    "package": "@zxing/browser",
+    "version": "0.1.5",
+    "file": "zxing-0.1.5.js",
+    "sha256": "b5ad3df920738ca7adcb74508d7e6b6a5b9024993fb9a0c702da1ad8964eca07"
+  }
+]

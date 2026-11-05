@@ -2,15 +2,17 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://dkiyakjftqcbbnfrgnmh.supabase.co; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<title>Desossa</title>
+<title>TESTES — Desossa</title>
 <meta name="theme-color" content="#1E2422" />
 <link rel="manifest" href="manifest.json" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=27" />
+<link rel="stylesheet" href="style.css?v=test-2" />
 </head>
 <body>
+<div role="status" style="background:#ffe08a;color:#241d00;padding:10px;text-align:center;font-weight:bold">AMBIENTE DE TESTES — dados sem validade operacional</div>
 
 <div id="offline-banner" class="offline-banner hidden">Sem internet — os lançamentos ficam guardados e enviam sozinhos depois</div>
 <div id="pending-badge" class="pending-badge hidden"></div>
@@ -29,11 +31,16 @@
   </button>
 </nav>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="config.js?v=27"></script>
-<script src="db.js?v=27"></script>
-<script src="sync.js?v=27"></script>
-<script src="scanner.js?v=27"></script>
-<script src="app.js?v=27"></script>
+<script src="vendor/supabase-2.119.0.js"></script>
+<script src="vendor/purify-3.4.17.js"></script>
+<script src="seguranca.js"></script>
+<script src="runtime-config.js"></script>
+<script src="config.js?v=test-2"></script>
+<script src="db.js?v=test-2"></script>
+<script src="sync.js?v=test-2"></script>
+<script src="vendor/zxing-0.1.5.js"></script>
+<script src="backup.js"></script>
+<script src="scanner.js?v=test-2"></script>
+<script src="app.js?v=test-2"></script>
 </body>
 </html>
