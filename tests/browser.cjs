@@ -15,7 +15,7 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  if(u.pathname.startsWith('/api/')){
   const chunks=[];for await(const c of req)chunks.push(c);const body=Buffer.concat(chunks).toString();
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
-  if(u.pathname==='/api/session')return res.end(JSON.stringify(req.method==='GET'?{colaboradores:[pessoa],role:'gestor'}:{ok:true,usuario:pessoa,role:'operador'}));
+  if(u.pathname==='/api/session')return res.end(JSON.stringify(req.method==='GET'?{colaboradores:[pessoa],role:'gestor',authenticated:true}:{ok:true,usuario:pessoa,role:'operador'}));
   const query=new URL(u.searchParams.get('path'),'https://test.invalid'),table=query.pathname.split('/').pop();
   if(req.method==='POST'&&table==='lancamentos'){inserted.push(JSON.parse(body));return res.end('');}
   const data=datasets[table]||[];res.setHeader('Content-Range','0-'+Math.max(data.length-1,0)+'/'+data.length);
@@ -71,14 +71,35 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  assert.equal(decoded.codigo,'00123');assert.equal(decoded.peso,1.234);
  const camera=await page.evaluate(async()=>{const v=document.createElement('video');v.id='teste-video';v.muted=true;v.playsInline=true;document.body.append(v);await iniciarScanner(v.id,()=>{});const tracks=v.srcObject.getTracks();await pararScanner();return tracks.every(t=>t.readyState==='ended')});
  assert.equal(camera,true);
- await page.goto(base+'/painel-gestor.html');await page.locator('#portao-senha').fill('gestor-ficticio');await page.locator('#portao-entrar').click();
+ await page.goto(base+'/painel-gestor.html');
+ assert.equal(await page.locator('input[type=password]').count(),0);
  await page.waitForFunction(()=>document.querySelectorAll('.kpi-card').length===9);
  assert.ok((await page.locator('.kpi-card').filter({hasText:'Perda registrada'}).innerText()).includes('10,000 kg'));
  assert.equal(await page.locator('#tabela-pecas img').count(),0);
  assert.ok((await page.locator('#tabela-pecas tbody').innerText()).includes('<img src=x'));
  const sqlErrorPage=await context.newPage();await sqlErrorPage.route('**/api/database?**',r=>r.fulfill({status:500,contentType:'application/json',body:JSON.stringify({message:'Falha fictícia'})}));
- await sqlErrorPage.goto(base+'/painel-gestor.html');await sqlErrorPage.locator('#portao-senha').fill('gestor-ficticio');await sqlErrorPage.locator('#portao-entrar').click();
+ await sqlErrorPage.goto(base+'/painel-gestor.html');
  await sqlErrorPage.getByText('Relatório indisponível:',{exact:false}).waitFor();assert.equal(await sqlErrorPage.locator('#btn-exportar').isDisabled(),true);
+ for (const sessao of [{authenticated:false,role:null},{authenticated:true,role:'operador'}]) {
+   const bloqueado=await context.newPage();let consultas=0;
+   await bloqueado.route('**/api/session',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({...sessao,colaboradores:[]})}));
+   await bloqueado.route('**/api/database?**',route=>{consultas++;return route.abort()});
+   await bloqueado.goto(base+'/painel-gestor.html');
+   await bloqueado.locator('#portao-voltar').waitFor({state:'visible'});
+   assert.equal(await bloqueado.locator('#painel').isVisible(),false);
+   assert.equal(await bloqueado.locator('input[type=password]').count(),0);
+   assert.equal(consultas,0);
+   await bloqueado.close();
+ }
+ const falhaSessao=await context.newPage();
+ await falhaSessao.route('**/api/session',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({message:'indisponível'})}));
+ await falhaSessao.goto(base+'/painel-gestor.html');
+ await falhaSessao.locator('#portao-tentar').waitFor({state:'visible'});
+ assert.equal(await falhaSessao.locator('#painel').isVisible(),false);
+ await falhaSessao.unroute('**/api/session');
+ await falhaSessao.locator('#portao-tentar').click();
+ await falhaSessao.waitForFunction(()=>document.querySelectorAll('.kpi-card').length===9);
+ await falhaSessao.close();
  assert.deepEqual(errors,[]);
  console.log('PASS: login, fila offline/transação/reenvio, backup, CSP, leitura EAN por imagem, câmera simulada/encerramento, relatório, XSS e erro de consulta. Zero conexões externas reais.');
  }finally{await browser.close();await new Promise(r=>server.close(r));}

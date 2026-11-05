@@ -7,7 +7,12 @@ module.exports=async(req,res)=>{
  if(req.method==='DELETE'){c.cookie(res,null);return res.json({ok:true});}
  if(req.method==='GET'){
   const colaboradores=await c.jsonBanco('/rest/v1/colaboradores?select=id,nome,foto_url&ativo=eq.true&order=nome');
-  const s=c.session(req);return res.json({authenticated:!!s,role:s?.role||null,colaboradores});
+  let s=null;
+  if(c.session(req)){
+   try{s=await c.autenticar(req)}
+   catch(e){if(e.status!==401)throw e;c.cookie(res,null)}
+  }
+  return res.json({authenticated:!!s,role:s?.role||null,colaboradores});
  }
  if(req.method!=='POST')throw c.error(405,'Método não permitido.');
  const b=req.body||{};

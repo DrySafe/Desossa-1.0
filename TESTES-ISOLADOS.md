@@ -27,6 +27,8 @@ são históricos. As migrações revisadas estão em `supabase/migrations`.
   Operador não pode enviar pendência de outra pessoa nem acessar custos/auditoria.
   Entrada exige conexão; depois do login é possível registrar cortes offline.
   A senha de contingência do gestor é exclusiva de testes e fica somente no servidor.
+  O painel reutiliza a sessão de gestor, sem pedir senha novamente; confere o nível
+  atual no servidor e solicita retorno ao app se a sessão expirou ou não tem permissão.
 - Biblioteca de sanitização, SDK e leitor alternativo são locais e versionados.
   Leitor nativo EAN-13 permanece preferencial; ZXing atende navegadores sem ele.
   Zeros à esquerda são preservados. Catálogos antigos sem zeros são reconhecidos

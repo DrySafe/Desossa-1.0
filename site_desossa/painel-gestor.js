@@ -94,15 +94,34 @@ function exportarCSV() {
   const url = URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
   const a=document.createElement('a');a.href=url;a.download=`desossa-testes-${$('data-inicio').value}-${$('data-fim').value}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
-async function entrar() {
+let verificandoAcesso = false;
+async function verificarAcesso() {
+  if (verificandoAcesso) return;
+  verificandoAcesso = true;
+  $('portao-mensagem').textContent = 'Verificando seu acesso…';
+  $('portao-tentar').classList.add('hidden');
+  $('portao-voltar').classList.add('hidden');
   try {
-    await sessaoAPI({ adminPassword: $('portao-senha').value });
-    $('portao-senha').value=''; $('portao').classList.add('hidden'); $('painel').classList.remove('hidden'); carregarDados();
-  } catch (err) { $('portao-erro').textContent=err.message; $('portao-erro').classList.remove('hidden'); }
+    const sessao = await sessaoAPI(null, 'GET');
+    if (!sessao.authenticated || sessao.role !== 'gestor') {
+      $('portao-mensagem').textContent = sessao.authenticated
+        ? 'Seu perfil não tem permissão para acessar o painel.'
+        : 'Sua sessão terminou. Entre no aplicativo para acessar o painel.';
+      $('portao-voltar').classList.remove('hidden');
+      return;
+    }
+    $('portao').classList.add('hidden');
+    $('painel').classList.remove('hidden');
+    await carregarDados();
+  } catch (erro) {
+    $('portao-mensagem').textContent = 'Não foi possível verificar seu acesso. Tente novamente.';
+    $('portao-tentar').classList.remove('hidden');
+    $('portao-voltar').classList.remove('hidden');
+  } finally { verificandoAcesso = false; }
 }
 periodo(7);
-$('portao-entrar').addEventListener('click',entrar);
-$('portao-senha').addEventListener('keydown',e=>{if(e.key==='Enter')entrar()});
+$('portao-tentar').addEventListener('click', verificarAcesso);
+verificarAcesso();
 $('btn-atualizar').addEventListener('click',carregarDados);
 $('btn-exportar').addEventListener('click',exportarCSV);
 for(const id of ['data-inicio','data-fim']) $(id).addEventListener('change',carregarDados);

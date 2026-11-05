@@ -12,15 +12,14 @@
 <body>
 <div role="status" style="background:#ffe08a;color:#241d00;padding:10px;text-align:center;font-weight:bold">AMBIENTE DE TESTES — dados sem validade operacional</div>
 
-<!-- Portão de senha — mesma senha da Área do Gestor no app -->
+<!-- A sessão e a permissão atual são verificadas no servidor. -->
 <div id="portao" class="portao">
   <div class="portao-caixa">
     <div class="portao-marca">DESOSSA · PAINEL DE TESTES</div>
     <h1>Painel de Acompanhamento</h1>
-    <p>Digite a senha do gestor pra entrar.</p>
-    <input type="password" id="portao-senha" placeholder="Senha" autofocus />
-    <button id="portao-entrar">Entrar</button>
-    <p id="portao-erro" class="portao-erro hidden">Senha incorreta.</p>
+    <p id="portao-mensagem" role="status">Verificando seu acesso…</p>
+    <a id="portao-voltar" class="hidden" href="index.html">Voltar ao aplicativo</a>
+    <button id="portao-tentar" class="hidden" type="button">Tentar novamente</button>
   </div>
 </div>
 
