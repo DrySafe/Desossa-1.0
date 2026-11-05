@@ -1,0 +1,2 @@
+# Preserve upstream bundles byte-for-byte; integrity.json verifies their checksums.
+site_desossa/vendor/** linguist-vendored -whitespace
