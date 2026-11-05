@@ -283,11 +283,17 @@ function renderPin() {
       <div class="pin-dots" id="pin-dots">
         ${[0,1,2,3].map(() => '<span class="dot"></span>').join("")}
       </div>
-      <div id="pin-erro" class="pin-erro hidden">PIN incorreto, tente de novo</div>
-      <div class="teclado">
+      <div id="pin-erro" class="pin-erro hidden" role="alert">PIN incorreto, tente de novo</div>
+      <div class="teclado" id="pin-teclado" aria-busy="false">
         ${["1","2","3","4","5","6","7","8","9","","0","⌫"].map((n) =>
           n === "" ? '<span></span>' : `<button class="tecla" data-tecla="${n}">${n}</button>`
         ).join("")}
+      </div>
+      <div id="pin-status" class="pin-status hidden" role="status" aria-live="polite" aria-atomic="true">
+        <p id="pin-status-texto">Efetuando login…</p>
+        <div class="pin-progresso" role="progressbar" aria-label="Login em andamento">
+          <span class="pin-progresso-movimento" aria-hidden="true"></span>
+        </div>
       </div>
     </div>
   `);
@@ -296,6 +302,16 @@ function renderPin() {
     renderLogin();
   });
   el.querySelectorAll(".tecla").forEach((t) => t.addEventListener("click", () => onTeclaPin(t.dataset.tecla)));
+}
+
+function mostrarProgressoPin(ativo, texto = 'Efetuando login…') {
+  const status = document.getElementById('pin-status');
+  if (!status) return;
+  status.classList.toggle('hidden', !ativo);
+  document.getElementById('pin-status-texto').textContent = texto;
+  document.getElementById('pin-teclado').setAttribute('aria-busy', String(ativo));
+  document.querySelectorAll('#pin-teclado button, #pin-voltar').forEach(botao => { botao.disabled = ativo; });
+  if (ativo) status.scrollIntoView({ block: 'nearest', behavior: 'auto' });
 }
 
 async function onTeclaPin(tecla) {
@@ -319,12 +335,14 @@ async function onTeclaPin(tecla) {
 
   if (pinDigitado.length === 4) {
     autenticandoPin = true;
+    mostrarProgressoPin(true);
     try {
       const data = await sessaoAPI({ id: state.candidatoLogin.id, pin: pinDigitado });
       state.usuario = data.usuario;
       sincronizacaoAutorizada = true;
       state.candidatoLogin = null;
       pinDigitado = "";
+      mostrarProgressoPin(true, "Carregando dados do aplicativo…");
       await salvarSessao(state.usuario);
       await atualizarCacheReferencia();
       state.cortes = await idbGetAll(STORES.cortes);
@@ -334,9 +352,9 @@ async function onTeclaPin(tecla) {
     } catch (err) {
       pinDigitado = "";
       mostrarToast(err.message);
-      if (erroEl) erroEl.classList.remove("hidden");
+      if (erroEl) { erroEl.textContent = err.message || "Não foi possível entrar. Tente novamente."; erroEl.classList.remove("hidden"); }
       document.querySelectorAll("#pin-dots .dot").forEach(d => d.classList.remove("preenchido"));
-    } finally { autenticandoPin = false; }
+    } finally { autenticandoPin = false; mostrarProgressoPin(false); }
   }
 }
 

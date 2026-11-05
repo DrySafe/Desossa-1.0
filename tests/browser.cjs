@@ -8,16 +8,26 @@ const uid='00000000-0000-4000-8000-000000000001',rid='00000000-0000-4000-8000-00
 const pessoa={id:uid,nome:'Pessoa Teste',ativo:true,nivel_acesso:'operador'};
 const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PATINHO',preco_venda_kg:20,ativo:true}],recebimentos:[{id:rid,fornecedor:'Fornecedor Teste',status:'aberto',data_entrada:isoLocal()}],vw_rendimento_lote:[{lote_id:pid,recebimento_id:rid,tipo:'traseiro',numero_peca:1,peso_liquido_kg:100,peso_total_desossado:0}],vw_recebimentos_progresso:[],vw_lancamentos_detalhado:[],vw_relatorio_pecas:[{lote_id:pid,tipo:'traseiro',numero_peca:1,fornecedor:'<img src=x onerror=alert(1)>',data_referencia:isoLocal(),peso_liquido_kg:100,peso_carne_kg:80,peso_sebo_osso_kg:10,peso_quebra_kg:10,preco_kg_custo:10,valor_estimado:1602,status_recebimento:'finalizado'}]};
 (async()=>{
- let inserted=[];
+ let inserted=[],tentativasLogin=0;
+ let liberarLogin,recebeuLogin,liberarCache,recebeuCache;
+ const loginSuspenso=new Promise(r=>liberarLogin=r),loginRecebido=new Promise(r=>recebeuLogin=r);
+ const cacheSuspenso=new Promise(r=>liberarCache=r),cacheRecebido=new Promise(r=>recebeuCache=r);
  const root=path.resolve('dist');
  const server=http.createServer(async(req,res)=>{
  const u=new URL(req.url,'http://localhost');
  if(u.pathname.startsWith('/api/')){
   const chunks=[];for await(const c of req)chunks.push(c);const body=Buffer.concat(chunks).toString();
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
-  if(u.pathname==='/api/session')return res.end(JSON.stringify(req.method==='GET'?{colaboradores:[pessoa],role:'gestor',authenticated:true}:{ok:true,usuario:pessoa,role:'operador'}));
+  if(u.pathname==='/api/session'){
+   if(req.method==='GET')return res.end(JSON.stringify({colaboradores:[pessoa],role:'gestor',authenticated:true}));
+   tentativasLogin++;
+   if(JSON.parse(body).pin==='0000'){res.statusCode=401;return res.end(JSON.stringify({message:'Credenciais inválidas.'}));}
+   recebeuLogin();await loginSuspenso;
+   return res.end(JSON.stringify({ok:true,usuario:pessoa,role:'operador'}));
+  }
   const query=new URL(u.searchParams.get('path'),'https://test.invalid'),table=query.pathname.split('/').pop();
   if(req.method==='POST'&&table==='lancamentos'){inserted.push(JSON.parse(body));return res.end('');}
+  if(req.method==='GET'&&['colaboradores','cortes_catalogo','recebimentos','vw_rendimento_lote'].includes(table)){recebeuCache();await cacheSuspenso;}
   const data=datasets[table]||[];res.setHeader('Content-Range','0-'+Math.max(data.length-1,0)+'/'+data.length);
   return res.end(JSON.stringify(data));
  }
@@ -34,8 +44,37 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  const base='http://127.0.0.1:'+server.address().port;
  await page.goto(base);await page.getByText('Quem é você?').waitFor();
  await page.locator('.login-card').click();
+ await page.setViewportSize({width:390,height:844});
+ for(const n of '0000')await page.locator('[data-tecla="'+n+'"]').click();
+ await page.locator('#pin-erro').waitFor({state:'visible'});
+ assert.equal(await page.locator('#pin-status').isVisible(),false);
+ assert.equal(await page.locator('#pin-voltar').isEnabled(),true);
+ assert.equal(await page.locator('.tecla:disabled').count(),0);
+ assert.equal(await page.locator('#pin-dots .preenchido').count(),0);
  for(const n of '1234')await page.locator('[data-tecla="'+n+'"]').click();
+ await loginRecebido;
+ await page.locator('#pin-status').waitFor({state:'visible'});
+ assert.equal(await page.locator('#pin-status-texto').textContent(),'Efetuando login…');
+ assert.equal(await page.locator('#pin-teclado').getAttribute('aria-busy'),'true');
+ assert.equal(await page.locator('.tecla:disabled').count(),11);
+ assert.equal(await page.locator('#pin-voltar').isDisabled(),true);
+ assert.equal(await page.locator('#pin-status [role=progressbar]').getAttribute('aria-valuenow'),null);
+ await page.evaluate(()=>onTeclaPin('9'));assert.equal(tentativasLogin,2);
+ const statusBounds=await page.locator('#pin-status').boundingBox(),tecladoBounds=await page.locator('#pin-teclado').boundingBox();
+ assert.ok(statusBounds.y>=tecladoBounds.y+tecladoBounds.height);
+ assert.ok(statusBounds.y+statusBounds.height<=844);
+ await page.emulateMedia({reducedMotion:'reduce'});
+ assert.equal(await page.locator('.pin-progresso-movimento').evaluate(e=>getComputedStyle(e).animationName),'none');
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ assert.equal(await page.locator('.pin-progresso-movimento').evaluate(e=>getComputedStyle(e).animationName),'pin-carregando');
+ liberarLogin();await cacheRecebido;
+ await page.getByText('Carregando dados do aplicativo…',{exact:true}).waitFor();
+ assert.equal(await page.locator('.tecla:disabled').count(),11);
+ liberarCache();
  await page.waitForFunction(()=>!!state.usuario && state.cortes.length===1);
+ await page.locator('#btn-meu-perfil').waitFor();
+ await page.setViewportSize({width:1280,height:720});
+ assert.equal(tentativasLogin,2);
  assert.equal(await page.evaluate(()=>state.usuario.id),uid);
  assert.equal(await page.locator('#btn-acesso-gestor').count(),0);
  await page.evaluate(()=>{state.usuario.nivel_acesso='gestor';renderLancar()});
@@ -137,5 +176,5 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await falhaSessao.close();
  assert.deepEqual(errors,[]);
  console.log('PASS: login, fila offline/transação/reenvio, backup, CSP, leitura EAN por imagem, câmera simulada/encerramento, relatório, XSS e erro de consulta. Zero conexões externas reais.');
- }finally{await browser.close();await new Promise(r=>server.close(r));}
+ }finally{liberarLogin();liberarCache();await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1});
