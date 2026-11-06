@@ -35,6 +35,26 @@ function fmtDataLocal(data) {
   return new Date(iso).toLocaleDateString("pt-BR");
 }
 
+// A barra é permanente; as ações respeitam a sessão e o salvamento em andamento.
+let bloqueiosNavegacao = 0;
+function atualizarBarraSuperior() {
+  const gestor = document.getElementById('btn-acesso-gestor');
+  const trocar = document.getElementById('btn-trocar-usuario');
+  const podeVerGestor = state.usuario ? ['gestor', 'admin'].includes(state.usuario.nivel_acesso) : !state.candidatoLogin;
+  gestor.classList.toggle('hidden', !podeVerGestor);
+  trocar.classList.toggle('hidden', !state.usuario && !adminAutenticado);
+  gestor.setAttribute('aria-current', location.hash === '#admin' ? 'page' : 'false');
+  document.querySelectorAll('[data-app-navigation], #bottom-nav button').forEach(botao => {
+    botao.disabled = bloqueiosNavegacao > 0 || autenticandoPin;
+  });
+}
+function bloquearNavegacao(ativo) {
+  bloqueiosNavegacao = Math.max(0, bloqueiosNavegacao + (ativo ? 1 : -1));
+  atualizarBarraSuperior();
+}
+document.getElementById('btn-acesso-gestor').addEventListener('click', () => irPara('admin'));
+document.getElementById('btn-trocar-usuario').addEventListener('click', () => irPara('trocar'));
+
 // ---------- Router ----------
 function irPara(rota) {
   location.hash = rota;
@@ -44,8 +64,10 @@ window.addEventListener("hashchange", renderRota);
 async function renderRota() {
   await pararScanner();
   scannerAberto = false;
+  atualizarBarraSuperior();
   const rota = (location.hash || "#login").slice(1);
 
+  if (rota === "trocar") return trocarUsuario();
   if (rota === "admin") return renderAdmin();
   if (rota.startsWith("relatorio-")) return renderRelatorioRecebimento(rota.replace("relatorio-", ""));
   if (rota.startsWith("desossa-")) return renderRelatorioDesossa(rota.replace("desossa-", "")); // <-- ADICIONADO
@@ -72,17 +94,17 @@ async function renderRota() {
   if (rota === "novo-recebimento") return renderNovoRecebimento();
   if (rota === "add-pecas") return renderAddPecas();
   if (rota === "perfil") return renderPerfil();
-  if (rota === "trocar") return trocarUsuario();
   return renderLancar();
 }
 
 document.addEventListener("click", (e) => {
   const btn = e.target.closest(".nav-btn");
-  if (btn) irPara(btn.dataset.route);
+  if (btn && !btn.disabled) irPara(btn.dataset.route);
 });
 
 // ---------- Login: grade de fotos ----------
 function renderLogin() {
+  atualizarBarraSuperior();
   const cards = state.colaboradores.map((c) => `
     <button class="login-card" data-id="${c.id}">
       <div class="login-avatar" style="background-image:url('${c.foto_url || ""}')">
@@ -99,7 +121,6 @@ function renderLogin() {
       <div class="login-grid">
         ${cards || `<p class="empty-msg">${state.erroInicial || 'Nenhum colaborador cadastrado ainda.'}</p>`}
       </div>
-      <button class="link-discreto" id="btn-area-gestor">Área do gestor</button>
       <button class="link-discreto" id="btn-backup-pendencias">Exportar pendências para recuperação</button>
       <button class="link-discreto" id="btn-restaurar-pendencias">Restaurar pendências de testes</button>
       <input type="file" id="backup-arquivo" accept="application/json" class="hidden" />
@@ -119,7 +140,6 @@ function renderLogin() {
     const arquivo=e.target.files[0];if(!arquivo)return;
     try{const n=await restaurarPendencias(arquivo);mostrarToast(`${n} pendência(s) conferidas. Entre com o usuário original para enviar.`);atualizarBadgePendente()}catch(err){alert(err.message)}
   });
-  document.getElementById("btn-area-gestor").addEventListener("click", () => irPara("admin"));
   document.getElementById("btn-forcar-atualizacao").addEventListener("click", forcarAtualizacaoApp);
 }
 
@@ -273,6 +293,7 @@ async function renderRelatorioDesossa(recebimentoId) {
 let pinDigitado = "";
 let autenticandoPin = false;
 function renderPin() {
+  atualizarBarraSuperior();
   const c = state.candidatoLogin;
   pinDigitado = "";
   el.innerHTML = sanitizarHTML(`
@@ -308,6 +329,7 @@ function renderPin() {
 }
 
 function mostrarProgressoPin(ativo, texto = 'Efetuando login…') {
+  atualizarBarraSuperior();
   const status = document.getElementById('pin-status');
   if (!status) return;
   status.classList.toggle('hidden', !ativo);
@@ -453,6 +475,8 @@ async function trocarUsuario() {
   sincronizacaoAutorizada = false;
   try { await sessaoAPI(null, "DELETE"); } catch {}
   state.usuario = null;
+  state.candidatoLogin = null;
+  adminAutenticado = false;
   state.loteAtivo = null;
   await limparSessao();
   irPara("login");
@@ -464,6 +488,7 @@ let scannerAberto = false;
 let leituraAtual = null;
 
 function renderLancar() {
+  atualizarBarraSuperior();
   const lote = state.loteAtivo;
   const recebimentoDoLote = lote ? state.recebimentos.find((r) => r.id === lote.recebimento_id) : null;
   leituraAtual = null;
@@ -478,7 +503,6 @@ function renderLancar() {
           </div>
           <span>${state.usuario.nome}</span>
         </button>
-        ${['gestor', 'admin'].includes(state.usuario.nivel_acesso) ? '<button class="botao-secundario" id="btn-acesso-gestor">Área do gestor</button>' : ''}
       </header>
 
       ${lote ? `
@@ -513,7 +537,6 @@ function renderLancar() {
       <div id="lista-recentes"></div>
     </div>
   `);
-  document.getElementById("btn-acesso-gestor")?.addEventListener("click", () => irPara("admin"));
   document.getElementById("btn-meu-perfil").addEventListener("click", () => irPara("perfil"));
 
   if (!lote) {
@@ -614,7 +637,7 @@ async function abrirScanner() {
   leiturasLote.clear();
 
   el.innerHTML = sanitizarHTML(`
-    <div class="screen scanner-screen" style="display:flex; flex-direction:column; height:100vh; overflow:hidden;">
+    <div class="screen scanner-screen" style="display:flex; flex-direction:column; height:calc(100dvh - var(--app-chrome-height, 0px) - 88px); overflow:hidden;">
       <header class="topo-scanner" style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:#000; color:#fff; flex-shrink:0;">
         <button class="voltar" id="scanner-voltar">‹ Voltar</button>
         <button class="botao-flash" id="btn-flash">💡 Flash</button>
@@ -1250,6 +1273,7 @@ function renderNovoRecebimento() {
     const status = document.getElementById('recebimento-status'), erro = document.getElementById('recebimento-erro');
     const statusTexto = document.getElementById('recebimento-status-texto');
     salvando = true;
+    bloquearNavegacao(true);
     form.setAttribute('aria-busy', 'true');
     form.querySelectorAll('input,button').forEach(campo => { campo.disabled = true; });
     document.getElementById('rec-voltar').disabled = true;
@@ -1280,6 +1304,7 @@ function renderNovoRecebimento() {
       erro.classList.remove('hidden');
     } finally {
       salvando = false;
+      bloquearNavegacao(false);
       form.setAttribute('aria-busy', 'false');
       form.querySelectorAll('input,button').forEach(campo => { campo.disabled = false; });
       if (form.isConnected) document.getElementById('rec-voltar').disabled = false;
@@ -1393,10 +1418,11 @@ async function renderAddPecas() {
       erro.textContent='Escolha o tipo, quem carregou e um peso bruto maior que o peso do carregador.';erro.classList.remove('hidden');return;
     }
     const tela = form.closest('.screen');
-    const controles = [...tela.querySelectorAll('button,input,select'), ...document.querySelectorAll('#bottom-nav button')].map(campo => [campo,campo.disabled]);
+    const controles = [...tela.querySelectorAll('button,input,select')].map(campo => [campo,campo.disabled]);
     const botao = form.querySelector('button[type="submit"]'), textoBotao = botao.textContent;
     const status = document.getElementById('peca-status'), mensagem = document.getElementById('peca-status-texto');
     salvandoPeca = true;consultaTipo++;
+    bloquearNavegacao(true);
     controles.forEach(([campo]) => {campo.disabled=true});form.setAttribute('aria-busy','true');
     botao.textContent='Salvando…';erro.classList.add('hidden');status.classList.remove('hidden');
     mensagem.textContent='Conferindo peças já registradas…';status.scrollIntoView({block:'nearest',behavior:'auto'});
@@ -1420,6 +1446,7 @@ async function renderAddPecas() {
       erro.textContent='Não foi possível confirmar a peça. '+err.message;erro.classList.remove('hidden');
     } finally {
       salvandoPeca=false;
+      bloquearNavegacao(false);
       controles.forEach(([campo,disabled])=>{campo.disabled=disabled});form.setAttribute('aria-busy','false');
       botao.textContent=tentativaPeca?'Confirmar peça':textoBotao;status.classList.add('hidden');
     }
@@ -1561,6 +1588,7 @@ async function renderAdmin() {
 }
 
 function renderAdminLogin() {
+  atualizarBarraSuperior();
   el.innerHTML = sanitizarHTML(`
     <div class="screen pin-screen">
       <button class="voltar" id="admin-voltar">‹ Voltar</button>
@@ -1581,6 +1609,7 @@ function renderAdminLogin() {
 }
 
 function renderAdminShell() {
+  atualizarBarraSuperior();
   el.innerHTML = sanitizarHTML(`
     <div class="screen admin-screen">
       <header class="admin-topo">
@@ -1601,7 +1630,7 @@ function renderAdminShell() {
       <div id="admin-conteudo"></div>
     </div>
   `);
-  document.getElementById("admin-sair").addEventListener("click", async () => { await sessaoAPI(null, "DELETE"); adminAutenticado = false; irPara("login"); });
+  document.getElementById("admin-sair").addEventListener("click", trocarUsuario);
   el.querySelectorAll(".aba").forEach((b) => b.addEventListener("click", () => { abaAdminAtual = b.dataset.aba; renderAdminShell(); }));
 
   if (abaAdminAtual === "cortes") renderAdminCortes();

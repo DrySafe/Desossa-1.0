@@ -6,16 +6,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>TESTES — Desossa</title>
 <meta name="theme-color" content="#1E2422" />
+<script src="tema.js?v=test-3"></script>
 <link rel="manifest" href="manifest.json" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=test-2" />
+<link rel="stylesheet" href="style.css?v=test-3" />
+<link rel="stylesheet" href="tema.css?v=test-3" />
 </head>
-<body>
-<div role="status" style="background:#ffe08a;color:#241d00;padding:10px;text-align:center;font-weight:bold">AMBIENTE DE TESTES — dados sem validade operacional</div>
+<body class="app-page">
+<header id="app-chrome" class="app-chrome">
+  <nav id="app-toolbar" class="app-toolbar" aria-label="Ações do aplicativo">
+    <span class="toolbar-brand">DESOSSA</span>
+    <div class="toolbar-acoes">
+      <button type="button" id="btn-acesso-gestor" class="toolbar-botao hidden" data-app-navigation>Área do gestor</button>
+      <button type="button" id="btn-trocar-usuario" class="toolbar-botao hidden" data-app-navigation>Trocar usuário</button>
+      <button type="button" class="toolbar-botao tema-botao" data-theme-toggle aria-pressed="false">Modo escuro</button>
+    </div>
+  </nav>
+  <div class="aviso-ambiente" role="status">AMBIENTE DE TESTES — dados sem validade operacional</div>
 
 <div id="offline-banner" class="offline-banner hidden">Sem internet — os lançamentos ficam guardados e enviam sozinhos depois</div>
 <div id="pending-badge" class="pending-badge hidden"></div>
+</header>
 
 <main id="app" class="app"></main>
 
@@ -25,9 +37,6 @@
   </button>
   <button data-route="lote" class="nav-btn">
     <span class="nav-icon">▣</span><span>Peça</span>
-  </button>
-  <button data-route="trocar" class="nav-btn nav-btn-exit">
-    <span class="nav-icon">↺</span><span>Trocar</span>
   </button>
 </nav>
 
@@ -41,6 +50,6 @@
 <script src="vendor/zxing-0.1.5.js"></script>
 <script src="backup.js"></script>
 <script src="scanner.js?v=test-2"></script>
-<script src="app.js?v=test-2"></script>
+<script src="app.js?v=test-3"></script>
 </body>
 </html>

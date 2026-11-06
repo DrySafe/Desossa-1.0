@@ -4,10 +4,13 @@
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://dkiyakjftqcbbnfrgnmh.supabase.co; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#1E2422" />
+<script src="tema.js?v=test-3"></script>
 <title>TESTES — Painel de Acompanhamento — Desossa</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="painel-gestor.css" />
+<link rel="stylesheet" href="tema.css?v=test-3" />
 </head>
 <body>
 <div class="aviso-ambiente" role="status" style="background:#ffe08a;color:#241d00;padding:10px;text-align:center;font-weight:bold">AMBIENTE DE TESTES — dados sem validade operacional</div>
@@ -69,6 +72,7 @@
     <header class="conteudo-topo">
       <div class="topo-acoes">
         <h1>Acompanhamento da Desossa</h1>
+        <button type="button" class="toolbar-botao tema-botao" data-theme-toggle aria-pressed="false">Modo escuro</button>
         <a id="btn-sair-painel" class="botao-sair" href="index.html">← Sair do acompanhamento</a>
       </div>
       <p id="resumo-periodo" class="resumo-periodo"></p>

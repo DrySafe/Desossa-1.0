@@ -8,7 +8,7 @@ const uid='00000000-0000-4000-8000-000000000001',rid='00000000-0000-4000-8000-00
 const pessoa={id:uid,nome:'Pessoa Teste',ativo:true,nivel_acesso:'operador'};
 const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PATINHO',preco_venda_kg:20,ativo:true}],recebimentos:[{id:rid,fornecedor:'Fornecedor Teste',status:'aberto',data_entrada:isoLocal()}],vw_rendimento_lote:[{lote_id:pid,recebimento_id:rid,tipo:'traseiro',numero_peca:1,peso_liquido_kg:100,peso_total_desossado:0}],vw_recebimentos_progresso:[],vw_lancamentos_detalhado:[],vw_relatorio_pecas:[{lote_id:pid,tipo:'traseiro',numero_peca:1,fornecedor:'<img src=x onerror=alert(1)>',data_referencia:isoLocal(),peso_liquido_kg:100,peso_carne_kg:80,peso_sebo_osso_kg:10,peso_quebra_kg:10,preco_kg_custo:10,valor_estimado:1602,status_recebimento:'finalizado'}]};
 (async()=>{
- let inserted=[],tentativasLogin=0;
+ let inserted=[],tentativasLogin=0,trocasUsuario=0;
  let liberarLogin,recebeuLogin,liberarCache,recebeuCache;
  const loginSuspenso=new Promise(r=>liberarLogin=r),loginRecebido=new Promise(r=>recebeuLogin=r);
  const cacheSuspenso=new Promise(r=>liberarCache=r),cacheRecebido=new Promise(r=>recebeuCache=r);
@@ -29,6 +29,7 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
   if(u.pathname==='/api/session'){
    if(req.method==='GET')return res.end(JSON.stringify({colaboradores:[pessoa],role:'gestor',authenticated:true}));
+   if(req.method==='DELETE'){trocasUsuario++;return res.end(JSON.stringify({ok:true}));}
    tentativasLogin++;
    if(JSON.parse(body).pin==='0000'){res.statusCode=401;return res.end(JSON.stringify({message:'Credenciais inválidas.'}));}
    recebeuLogin();await loginSuspenso;
@@ -75,11 +76,23 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox','--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
  try{
- const context=await browser.newContext({permissions:['camera']});
+ const context=await browser.newContext({permissions:['camera'],colorScheme:'light'});
  let externals=0;await context.route('**/*',route=>{if(route.request().url().startsWith('http://127.0.0.1:'))return route.continue();externals++;return route.abort()});
  const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const base='http://127.0.0.1:'+server.address().port;
  await page.goto(base);await page.getByText('Quem é você?').waitFor();
+ // Tema segue o aparelho até a escolha explícita; escolha persiste ao recarregar.
+ await page.emulateMedia({colorScheme:'dark'});
+ await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+ await page.emulateMedia({colorScheme:'light'});
+ await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');
+ await page.locator('[data-theme-toggle]').click();
+ assert.equal(await page.locator('[data-theme-toggle]').getAttribute('aria-pressed'),'true');
+ await page.reload();await page.getByText('Quem é você?').waitFor();
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+ assert.equal(await page.locator('[data-theme-toggle]').textContent(),'Modo claro');
+ await page.locator('[data-theme-toggle]').click();
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
  await page.locator('.login-card').click();
  await page.setViewportSize({width:390,height:844});
  for(const n of '0000')await page.locator('[data-tecla="'+n+'"]').click();
@@ -127,6 +140,7 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  assert.equal(await page.locator('#recebimento-status').isVisible(),true);
  assert.equal(await page.locator('#recebimento-status-texto').textContent(),'Salvando recebimento…');
  assert.equal(await page.locator('#form-recebimento button[type=submit]').isDisabled(),true);
+ assert.equal(await page.locator('#btn-trocar-usuario').isDisabled(),true);
  assert.equal(await page.locator('#form-peca').count(),0);
  await page.evaluate(()=>document.querySelector('#form-recebimento').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
  assert.equal(enviosRecebimento,1);
@@ -136,6 +150,7 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  liberarConferencia();
  await page.locator('#recebimento-erro').waitFor({state:'visible'});
  assert.equal(await page.locator('#form-recebimento button[type=submit]').isEnabled(),true);
+ assert.equal(await page.locator('#btn-trocar-usuario').isEnabled(),true);
  assert.equal(novosRecebimentos.length,1);
  await page.locator('#form-recebimento button[type=submit]').click();
  await page.locator('#form-peca').waitFor();
@@ -156,7 +171,13 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  for(const selector of ['#form-peca button[type=submit]','[name=entregador_usado]','#select-tipo-peca','[name=peso_bruto_kg]','#peca-voltar','#btn-concluir-pecas'])assert.equal(await page.locator(selector).isDisabled(),true);
  await page.evaluate(()=>document.querySelector('#form-peca').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
  assert.equal(enviosPeca,1);
- assert.equal(await page.locator('#bottom-nav button:disabled').count(),3);
+ assert.equal(await page.locator('#bottom-nav button:disabled').count(),2);
+ assert.equal(await page.locator('#btn-trocar-usuario').isDisabled(),true);
+ await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
+ const barraFixa=await page.locator('#app-toolbar').boundingBox();
+ assert.ok(barraFixa.y===0&&barraFixa.x+barraFixa.width<=390);
+ const trocarFixo=await page.locator('#btn-trocar-usuario').boundingBox();
+ assert.ok(trocarFixo.y>=0&&trocarFixo.y+trocarFixo.height<844);
  liberarPeca();await conferenciaPecaRecebida;
  assert.equal(await page.locator('#peca-status-texto').textContent(),'Conferindo peça salva…');
  assert.equal(await page.locator('[name=entregador_usado]').isDisabled(),true);
@@ -179,8 +200,18 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  assert.ok(!(await page.locator('#app').innerText()).match(/undefined|NaN/));
  await page.evaluate(()=>irPara('lancar'));await page.locator('#btn-meu-perfil').waitFor();
 
- assert.equal(await page.locator('#btn-acesso-gestor').count(),0);
+ assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),false);
  await page.evaluate(()=>{state.usuario.nivel_acesso='gestor';renderLancar()});
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),true);
+ const gestorFixo=await page.locator('#btn-acesso-gestor').boundingBox();
+ assert.ok(gestorFixo.y>=0&&gestorFixo.x+gestorFixo.width<=390);
+ fs.mkdirSync('test-results',{recursive:true});
+ await page.locator('[data-theme-toggle]').click();
+ await page.screenshot({path:'test-results/barra-superior-escura-celular.png',fullPage:true});
+ await page.locator('[data-theme-toggle]').click();
+ await page.screenshot({path:'test-results/barra-superior-clara-celular.png',fullPage:true});
+ await page.setViewportSize({width:1280,height:720});
  await page.locator('#btn-acesso-gestor').click();
  await page.locator('[data-aba="cortes"]').waitFor();
  await page.evaluate(()=>irPara('lancar'));
@@ -213,7 +244,25 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  assert.equal(decoded.codigo,'00123');assert.equal(decoded.peso,1.234);
  const camera=await page.evaluate(async()=>{const v=document.createElement('video');v.id='teste-video';v.muted=true;v.playsInline=true;document.body.append(v);await iniciarScanner(v.id,()=>{});const tracks=v.srcObject.getTracks();await pararScanner();return tracks.every(t=>t.readyState==='ended')});
  assert.equal(camera,true);
+ // A câmera e a ação de salvar cabem entre a barra nova e a navegação inferior.
+ await page.setViewportSize({width:390,height:844});
+ await page.evaluate(()=>{window.scrollTo(0,0);return abrirScanner()});
+ await page.waitForFunction(()=>document.querySelector('#video-scanner')?.srcObject?.getTracks().some(t=>t.readyState==='live'));
+ const salvarEtiquetas=await page.locator('#btn-concluir-lote').boundingBox();
+ const rodape=await page.locator('#bottom-nav').boundingBox();
+ assert.ok(salvarEtiquetas.y>0&&salvarEtiquetas.y+salvarEtiquetas.height<=rodape.y);
+ await page.locator('#scanner-voltar').click();
+ await page.locator('#btn-meu-perfil').waitFor();
+ await page.setViewportSize({width:1280,height:720});
+ await page.locator('[data-theme-toggle]').click();
+ await page.locator('#btn-trocar-usuario').click();
+ await page.getByText('Quem é você?').waitFor();
+ assert.equal(trocasUsuario,1);
+ assert.equal(await page.evaluate(()=>state.usuario),null);
+ assert.equal(await page.evaluate(()=>adminAutenticado),false);
+ assert.equal(await page.locator('#btn-trocar-usuario').isVisible(),false);
  await page.goto(base+'/painel-gestor.html');
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
  assert.equal(await page.locator('input[type=password]').count(),0);
  await page.waitForFunction(()=>document.querySelectorAll('.kpi-card').length===9);
  assert.ok((await page.locator('.kpi-card').filter({hasText:'Perda registrada'}).innerText()).includes('10,000 kg'));
@@ -228,7 +277,9 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  assert.ok((await page.locator('#impressao-filtros').textContent()).includes('Tipo: Traseiro'));
  assert.ok((await page.locator('#totais-pecas').textContent()).includes('100,000 kg'));
  const bounds=await page.locator('#btn-sair-painel').boundingBox();assert.ok(bounds.x+bounds.width<=1280);assert.ok(bounds.height>=44);
+ await page.screenshot({path:'test-results/painel-escuro.png',fullPage:true});
  await page.emulateMedia({media:'print'});
+ assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 255, 255)');
  assert.equal(await page.locator('.barra-lateral').isVisible(),false);
  assert.equal(await page.locator('#btn-sair-painel').isVisible(),false);
  assert.equal(await page.locator('#cabecalho-impressao').isVisible(),true);

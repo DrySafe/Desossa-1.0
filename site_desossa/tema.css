@@ -1,0 +1,75 @@
+/* Barra extensível: novas ações podem ser acrescentadas sem cobrir o conteúdo. */
+:root { --app-chrome-height: 110px; }
+html { scroll-padding-top: calc(var(--app-chrome-height) + 12px); }
+.app-page { padding-top: var(--app-chrome-height); }
+.app-page .app { min-height: calc(100dvh - var(--app-chrome-height)); }
+.app-chrome {
+  position: fixed; inset: 0 0 auto; z-index: 40;
+  padding-top: env(safe-area-inset-top); background: var(--panel);
+  border-bottom: 1px solid var(--line); box-shadow: 0 2px 8px #00000012;
+}
+.app-toolbar {
+  max-width: 1100px; margin: auto; padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.toolbar-brand { font-family: var(--display); font-weight: 800; letter-spacing: 2px; color: var(--meat); }
+.toolbar-acoes { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.toolbar-botao {
+  min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); color: var(--ink); font: 600 13px var(--body); cursor: pointer;
+}
+.toolbar-botao:hover { background: var(--bg); }
+.toolbar-botao:focus-visible { outline: 3px solid var(--steel); outline-offset: 2px; }
+.toolbar-botao[aria-current="page"] { border-color: var(--meat); color: var(--meat); }
+.toolbar-botao:disabled { opacity: .5; cursor: wait; }
+.app-chrome .aviso-ambiente { background: #ffe08a; color: #241d00; padding: 7px 12px; text-align: center; font-size: 12px; line-height: 1.4; font-weight: 700; }
+.app-chrome .offline-banner, .app-chrome .pending-badge { position: static; margin: 0; }
+.admin-abas { flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .toolbar-brand { display: none; }
+  .toolbar-acoes { flex: 1; justify-content: flex-end; gap: 6px; }
+  .toolbar-botao { padding: 9px 10px; font-size: 12px; }
+}
+
+/* Somente a tela adota o tema escuro. Relatórios continuam em papel branco. */
+@media screen {
+  :root[data-theme="dark"] {
+    --bg: #101613;
+    --bg-main: #101613;
+    --panel: #1b2520;
+    --ink: #edf3ee;
+    --ink-soft: #b1beb5;
+    --line: #3e5045;
+    --meat: #f0a18e;
+    --meat-deep: #85321f;
+    --steel: #a6cbe2;
+    --success: #95d6a6;
+    --warn: #e6ba70;
+  }
+  [data-theme="dark"] .app-page :is(button, input, select, textarea) { color: var(--ink); }
+  [data-theme="dark"] .app-page :is(input, select, textarea) { background-color: var(--panel); }
+  [data-theme="dark"] :is(.login-avatar, .pin-avatar, .mini-avatar, .pending-badge) { background-color: #375061; color: #fff; }
+  [data-theme="dark"] :is(.lote-chip, .visor-balanca, .numero-peca-visor, .selo-finalizado, .card-resumo.destaque, .toast, .barra-lateral, .portao, .kpi-card.destaque) { background: #202d26; color: #fff; }
+  [data-theme="dark"] :is(.botao-grande, .aba.ativa, .botao-atualizar, .botao-sair, .chips-periodo button.ativo) { background: #a8402b; color: #fff; border-color: #a8402b; }
+  [data-theme="dark"] .botao-confirmar { background: #356d45; color: #fff; }
+  [data-theme="dark"] .botao-grande:active { background: #85321f; }
+  [data-theme="dark"] .botao-confirmar:active { background: #295637; }
+  [data-theme="dark"] :is(.lote-item.completa, .recebimento-travado .recebimento-cabecalho, tfoot td, tbody tr:hover) { background: #26372c; }
+  [data-theme="dark"] .pin-progresso { background: #35493c; }
+  [data-theme="dark"] .visor-peso input { background: none; color: #b6e5a8; }
+  [data-theme="dark"] .visor-preco input { background: none; color: #e9efea; }
+  [data-theme="dark"] #btn-lancar-quebra { background: #82500d !important; }
+  [data-theme="dark"] .painel-leituras small { color: var(--ink-soft) !important; }
+  [data-theme="dark"] .botao-imprimir { background: #edf3ee; color: #1e2422; }
+  [data-theme="dark"] .selo-completa { background: #263e2e; }
+  [data-theme="dark"] .selo-andamento { background: #42331c; }
+  [data-theme="dark"] .selo-alerta { background: #492c26; }
+  [data-theme="dark"] .relatorio-print-area { --success: #4c7a57; --steel: #375061; }
+  [data-theme="dark"] .relatorio-print-area .voltar { color: #375061; }
+}
+@media print {
+  html { color-scheme: light !important; }
+  #app-chrome, #bottom-nav, .no-print, .toast, [data-theme-toggle] { display: none !important; }
+  .app-page { padding-top: 0; background: #fff; }
+  .app-page .app { min-height: auto; padding: 0; }
+}
