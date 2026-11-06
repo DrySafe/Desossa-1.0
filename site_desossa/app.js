@@ -1345,7 +1345,7 @@ async function renderAddPecas() {
           <option value="traseiro">Traseiro</option>
         </select>
         <div class="numero-peca-visor" id="numero-peca-visor">Escolha o tipo pra ver o número da peça</div>
-        <input name="peso_bruto_kg" type="number" step="0.001" placeholder="Peso bruto (balança) kg" required />
+        <input name="peso_bruto_kg" type="number" min="0.001" step="0.001" placeholder="Peso bruto (balança) kg" required />
         <select name="entregador_usado" required>
           <option value="">Quem carregou?</option>
           <option value="${rec.peso_entregador_1_kg}">Entregador 1 (${fmtKg(rec.peso_entregador_1_kg)} kg)</option>
@@ -1353,6 +1353,13 @@ async function renderAddPecas() {
         </select>
         <button type="submit" class="botao-grande botao-confirmar">Adicionar peça</button>
       </form>
+      <div id="peca-status" class="pin-status hidden" role="status" aria-live="polite" aria-atomic="true">
+        <p id="peca-status-texto">Conferindo peças já registradas…</p>
+        <div class="pin-progresso" role="progressbar" aria-label="Salvando peça">
+          <span class="pin-progresso-movimento" aria-hidden="true"></span>
+        </div>
+      </div>
+      <p id="peca-erro" class="pin-erro hidden" role="alert"></p>
 
       <div class="zona-concluir">
         <button class="botao-concluir-distante" id="btn-concluir-pecas">Concluir por agora</button>
@@ -1362,38 +1369,59 @@ async function renderAddPecas() {
   document.getElementById("peca-voltar").addEventListener("click", () => irPara("lote"));
   document.getElementById("btn-concluir-pecas").addEventListener("click", () => { state.recebimentoEmEdicao = null; irPara("lote"); });
 
+  let salvandoPeca = false, tentativaPeca = null, consultaTipo = 0;
   const selectTipo = document.getElementById("select-tipo-peca");
   const visorNumero = document.getElementById("numero-peca-visor");
   selectTipo.addEventListener("change", async () => {
     if (!selectTipo.value) { visorNumero.textContent = "Escolha o tipo pra ver o número da peça"; return; }
+    const consulta = ++consultaTipo;
     visorNumero.textContent = "Calculando…";
-    pecasExistentes = await buscarPecasDoRecebimento(rec.id);
+    const atuais = await buscarPecasDoRecebimento(rec.id);
+    if (salvandoPeca || consulta !== consultaTipo || !selectTipo.isConnected) return;
+    pecasExistentes = atuais;
     const numero = proximoNumeroPorTipo(pecasExistentes, selectTipo.value);
     visorNumero.textContent = `${selectTipo.value === "dianteiro" ? "Dianteiro" : "Traseiro"} — peça número ${numero}`;
   });
 
   document.getElementById("form-peca").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
-    const tipo = f.get("tipo");
-    if (!tipo) return alert("Escolha o tipo da peça.");
+    if (salvandoPeca) return;
+    const form = e.target, f = new FormData(form);
+    const tipo = f.get('tipo'), bruto = Number(f.get('peso_bruto_kg')), desconto = Number(f.get('entregador_usado'));
+    const erro = document.getElementById('peca-erro');
+    if (!tipo || !f.get('entregador_usado') || !Number.isFinite(bruto) || !Number.isFinite(desconto) || bruto <= desconto || desconto < 0) {
+      erro.textContent='Escolha o tipo, quem carregou e um peso bruto maior que o peso do carregador.';erro.classList.remove('hidden');return;
+    }
+    const tela = form.closest('.screen');
+    const controles = [...tela.querySelectorAll('button,input,select'), ...document.querySelectorAll('#bottom-nav button')].map(campo => [campo,campo.disabled]);
+    const botao = form.querySelector('button[type="submit"]'), textoBotao = botao.textContent;
+    const status = document.getElementById('peca-status'), mensagem = document.getElementById('peca-status-texto');
+    salvandoPeca = true;consultaTipo++;
+    controles.forEach(([campo]) => {campo.disabled=true});form.setAttribute('aria-busy','true');
+    botao.textContent='Salvando…';erro.classList.add('hidden');status.classList.remove('hidden');
+    mensagem.textContent='Conferindo peças já registradas…';status.scrollIntoView({block:'nearest',behavior:'auto'});
     try {
-      const pecasNaHora = await buscarPecasDoRecebimento(rec.id);
-      await adicionarPeca(rec.id, {
-        tipo,
-        numero_peca: proximoNumeroPorTipo(pecasNaHora, tipo),
-        peso_bruto_kg: parseFloat(f.get("peso_bruto_kg")),
-        peso_entregador_usado_kg: parseFloat(f.get("entregador_usado"))
-      });
-      state.lotes = await idbGetAll(STORES.lotes);
-      renderAddPecas();
-    } catch (err) {
-      if (err.code === "23505") {
-        alert("Esse número de peça já foi usado. Atualizando a lista, tenta de novo.");
-        renderAddPecas();
-      } else {
-        alert("Não consegui salvar a peça (precisa de internet nessa etapa). " + err.message);
+      if (!tentativaPeca) {
+        const pecasNaHora = await buscarPecasDoRecebimento(rec.id, { exigirServidor:true });
+        tentativaPeca = { id:crypto.randomUUID(),tipo,numero_peca:proximoNumeroPorTipo(pecasNaHora,tipo),peso_bruto_kg:bruto,peso_entregador_usado_kg:desconto };
+      } else if (tentativaPeca.tipo!==tipo || tentativaPeca.peso_bruto_kg!==bruto || tentativaPeca.peso_entregador_usado_kg!==desconto) {
+        form.elements.tipo.value=tentativaPeca.tipo;
+        form.elements.peso_bruto_kg.value=tentativaPeca.peso_bruto_kg;
+        form.elements.entregador_usado.value=tentativaPeca.peso_entregador_usado_kg;
+        throw new Error('A peça anterior ainda aguarda confirmação. Os dados originais foram mantidos; confirme ou confira a lista antes de adicionar outra peça.');
       }
+      await adicionarPeca(rec.id, tentativaPeca, texto => {mensagem.textContent=texto});
+      state.lotes = await idbGetAll(STORES.lotes);
+      if (!form.isConnected) return;
+      await renderAddPecas();
+      mostrarToast('Peça salva e confirmada.');
+    } catch (err) {
+      if (err.code==='23505') tentativaPeca=null;
+      erro.textContent='Não foi possível confirmar a peça. '+err.message;erro.classList.remove('hidden');
+    } finally {
+      salvandoPeca=false;
+      controles.forEach(([campo,disabled])=>{campo.disabled=disabled});form.setAttribute('aria-busy','false');
+      botao.textContent=tentativaPeca?'Confirmar peça':textoBotao;status.classList.add('hidden');
     }
   });
 

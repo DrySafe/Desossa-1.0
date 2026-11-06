@@ -108,28 +108,37 @@ async function criarRecebimento(dados, progresso = () => {}) {
 // Busca as peças de um recebimento DIRETO do banco (sem cache) — importante pra calcular o
 // próximo número de peça (reaproveitando números de peças excluídas) sempre com o dado mais
 // atual possível, mesmo sem dar refresh na página.
-async function buscarPecasDoRecebimento(recebimentoId) {
+async function buscarPecasDoRecebimento(recebimentoId, { exigirServidor = false } = {}) {
   try {
     const sb = getSupabase();
-    const { data, error } = await sb.from("lotes").select("*").eq("recebimento_id", recebimentoId).order("numero_peca");
-    if (error) throw error;
+    const data = await buscarTodasPaginas(() => sb.from('lotes').select('*', { count: 'exact' }).eq('recebimento_id', recebimentoId).order('numero_peca').order('id'));
     return data || [];
   } catch (err) {
+    if (exigirServidor) throw err;
     console.warn("Sem internet ou erro ao buscar peças — usando cache local como melhor esforço:", err);
     return (await idbGetAll(STORES.lotes)).filter((l) => l.recebimento_id === recebimentoId);
   }
 }
 
-async function adicionarPeca(recebimentoId, { tipo, numero_peca, peso_bruto_kg, peso_entregador_usado_kg }) {
+async function adicionarPeca(recebimentoId, { id, tipo, numero_peca, peso_bruto_kg, peso_entregador_usado_kg }, progresso = () => {}) {
+  if (!['dianteiro','traseiro'].includes(tipo) || !Number.isInteger(numero_peca) || numero_peca < 1) throw new Error('Confira o tipo e o número da peça.');
   if (!Number.isFinite(peso_bruto_kg) || !Number.isFinite(peso_entregador_usado_kg) || peso_bruto_kg <= 0 || peso_entregador_usado_kg < 0 || peso_bruto_kg <= peso_entregador_usado_kg) throw new Error('Confira os pesos: o peso bruto deve ser maior que o peso do carregador.');
-  const peso_entrada_kg = Math.round((peso_bruto_kg - peso_entregador_usado_kg) * 1000) / 1000;
+  const payload = { id: id || crypto.randomUUID(), recebimento_id: recebimentoId, tipo, numero_peca,
+    peso_bruto_kg, peso_entregador_usado_kg, peso_entrada_kg: Math.round((peso_bruto_kg-peso_entregador_usado_kg)*1000)/1000 };
   const sb = getSupabase();
-  const { data, error } = await sb.from("lotes").insert({
-    recebimento_id: recebimentoId,
-    tipo, numero_peca, peso_bruto_kg, peso_entregador_usado_kg, peso_entrada_kg
-  }).select().single();
-  if (error) throw error;
-  const registro = registroConfirmado(data, ['recebimento_id', 'peso_entrada_kg']);
+  progresso('Salvando peça…');
+  const { error } = await sb.from('lotes').insert(payload).select().single();
+  if (error && error.code !== '23505') throw error;
+  progresso('Conferindo peça salva…');
+  const { data, error: erroConfirmacao } = await sb.from('lotes').select('*').eq('id', payload.id).maybeSingle();
+  if (erroConfirmacao) throw new Error('O envio foi recebido, mas a peça não foi confirmada. Tente confirmar novamente neste formulário.');
+  if (!data && error?.code === '23505') throw Object.assign(new Error('O número da peça foi usado por outro cadastro. Confira a lista antes de tentar novamente.'), { code:'23505' });
+  const registro = registroConfirmado(data, ['recebimento_id','tipo','numero_peca','peso_entrada_kg','peso_bruto_kg','peso_entregador_usado_kg']);
+  for (const campo of ['id','recebimento_id','tipo']) if (String(registro[campo]) !== String(payload[campo])) throw new Error('A peça retornada não corresponde à tentativa. Confira a lista antes de continuar.');
+  for (const campo of ['numero_peca','peso_entrada_kg','peso_bruto_kg','peso_entregador_usado_kg']) if (Number(registro[campo]) !== payload[campo]) throw new Error('Os pesos ou o número da peça não conferem. Confira a lista antes de continuar.');
+  progresso('Atualizando a lista de peças…');
+  const anterior = await idbGet(STORES.lotes, registro.id);
+  await idbPut(STORES.lotes, { ...registro, peso_total_desossado: anterior?.peso_total_desossado || 0 });
   await atualizarCacheReferencia();
   return registro;
 }

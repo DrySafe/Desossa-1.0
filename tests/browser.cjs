@@ -16,6 +16,11 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  const cadastroSuspenso=new Promise(r=>liberarCadastro=r),cadastroRecebido=new Promise(r=>recebeuCadastro=r);
  const conferenciaSuspensa=new Promise(r=>liberarConferencia=r),conferenciaRecebida=new Promise(r=>recebeuConferencia=r);
  const novosRecebimentos=[],headersSingle=[];let enviosRecebimento=0,leiturasConfirmacao=0;
+ let liberarPeca,recebeuPeca,liberarConferenciaPeca,recebeuConferenciaPeca;
+ const pecaSuspensa=new Promise(r=>liberarPeca=r),pecaRecebida=new Promise(r=>recebeuPeca=r);
+ const conferenciaPecaSuspensa=new Promise(r=>liberarConferenciaPeca=r),conferenciaPecaRecebida=new Promise(r=>recebeuConferenciaPeca=r);
+ let enviosPeca=0,leiturasPeca=0;
+
  const root=path.resolve('dist');
  const server=http.createServer(async(req,res)=>{
  const u=new URL(req.url,'http://localhost');
@@ -45,9 +50,16 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
    return res.end(JSON.stringify(single?novosRecebimentos[0]:[novosRecebimentos[0]]));
   }
   if(req.method==='POST'&&table==='lotes'){
-   headersSingle.push(req.headers.accept);const row={...JSON.parse(body),id:require('node:crypto').randomUUID(),status:'aberto'};
+   enviosPeca++;headersSingle.push(req.headers.accept);const payload=JSON.parse(body);
+   if(datasets.lotes?.some(p=>p.id===payload.id)){res.statusCode=409;return res.end(JSON.stringify({code:'23505',message:'Peça já gravada'}));}
+   recebeuPeca();await pecaSuspensa;
+   const row={...payload,status:'aberto'};
    datasets.lotes??=[];datasets.lotes.push(row);datasets.vw_rendimento_lote.push({lote_id:row.id,recebimento_id:row.recebimento_id,tipo:row.tipo,numero_peca:row.numero_peca,peso_liquido_kg:row.peso_entrada_kg,peso_total_desossado:0,status_lote:'aberto'});
    res.statusCode=201;return res.end(JSON.stringify(single?row:[row]));
+  }
+  if(req.method==='GET'&&table==='lotes'&&datasets.lotes?.length&&query.searchParams.get('id')?.slice(3)===datasets.lotes[0].id){
+   leiturasPeca++;recebeuConferenciaPeca();await conferenciaPecaSuspensa;
+   if(leiturasPeca===1){res.statusCode=400;return res.end(JSON.stringify({code:'TEST_CONFIRMATION_FAILURE',message:'Falha fictícia de conferência da peça'}));}
   }
   if(req.method==='POST'&&table==='lancamentos'){inserted.push(JSON.parse(body));return res.end('');}
   if(req.method==='GET'&&['colaboradores','cortes_catalogo','recebimentos','vw_rendimento_lote'].includes(table)){recebeuCache();await cacheSuspenso;}
@@ -136,8 +148,32 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await page.getByText('Traseiro — peça número 1',{exact:true}).waitFor();
  await page.locator('[name=peso_bruto_kg]').fill('165.25');
  await page.locator('[name=entregador_usado]').selectOption('65.25');
+ await page.setViewportSize({width:390,height:844});
+ await page.locator('#form-peca button[type=submit]').click();await pecaRecebida;
+ assert.equal(await page.locator('#peca-status').isVisible(),true);
+ assert.equal(await page.locator('#peca-status-texto').textContent(),'Salvando peça…');
+ const pecaBounds=await page.locator('#peca-status').boundingBox();assert.ok(pecaBounds.y>=0&&pecaBounds.y+pecaBounds.height<=744);
+ for(const selector of ['#form-peca button[type=submit]','[name=entregador_usado]','#select-tipo-peca','[name=peso_bruto_kg]','#peca-voltar','#btn-concluir-pecas'])assert.equal(await page.locator(selector).isDisabled(),true);
+ await page.evaluate(()=>document.querySelector('#form-peca').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+ assert.equal(enviosPeca,1);
+ assert.equal(await page.locator('#bottom-nav button:disabled').count(),3);
+ liberarPeca();await conferenciaPecaRecebida;
+ assert.equal(await page.locator('#peca-status-texto').textContent(),'Conferindo peça salva…');
+ assert.equal(await page.locator('[name=entregador_usado]').isDisabled(),true);
+ liberarConferenciaPeca();
+ await page.locator('#peca-erro').waitFor({state:'visible'});
+ assert.equal(await page.locator('#form-peca button[type=submit]').isEnabled(),true);
+ assert.equal(await page.locator('[name=entregador_usado]').isEnabled(),true);
+ assert.equal(datasets.lotes.length,1);
+ await page.locator('[name=entregador_usado]').selectOption('70.5');
+ await page.locator('#form-peca button[type=submit]').click();
+ assert.equal(await page.locator('[name=entregador_usado]').inputValue(),'65.25');
+ assert.equal(enviosPeca,1);
  await page.locator('#form-peca button[type=submit]').click();
  await page.getByText('100,000 kg líquido',{exact:true}).waitFor();
+ assert.equal(datasets.lotes.length,1);assert.equal(enviosPeca,2);
+ await page.setViewportSize({width:1280,height:720});
+
  assert.equal(datasets.lotes[0].peso_entrada_kg,100);
  assert.ok(headersSingle.every(h=>h==='application/vnd.pgrst.object+json'));
  assert.ok(!(await page.locator('#app').innerText()).match(/undefined|NaN/));
@@ -243,5 +279,5 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await falhaSessao.close();
  assert.deepEqual(errors,[]);
  console.log('PASS: login, fila offline/transação/reenvio, backup, CSP, leitura EAN por imagem, câmera simulada/encerramento, relatório, XSS e erro de consulta. Zero conexões externas reais.');
- }finally{liberarLogin();liberarCache();liberarCadastro();liberarConferencia();await browser.close();await new Promise(r=>server.close(r));}
+ }finally{liberarLogin();liberarCache();liberarCadastro();liberarConferencia();liberarPeca();liberarConferenciaPeca();await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1});

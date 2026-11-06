@@ -2,7 +2,7 @@ const c=require('../server/lib.cjs');
 const tables=new Set(['colaboradores','cortes_catalogo','recebimentos','lotes','lancamentos','exclusoes_log','auditoria_eventos','vw_rendimento_lote','vw_lancamentos_detalhado','vw_recebimentos_progresso','vw_lancamentos_completo','vw_relatorio_pecas']);
 const writes={
  recebimentos:['id','data_entrada','fornecedor','placa_veiculo','fiscal_prevencao','acougueiro_acompanhante','colaborador_recebeu_id','peso_entregador_1_kg','peso_entregador_2_kg','quantidade_dianteiro_esperada','quantidade_traseiro_esperada','status'],
- lotes:['recebimento_id','tipo','numero_peca','peso_bruto_kg','peso_entregador_usado_kg','peso_entrada_kg'],
+ lotes:['id','recebimento_id','tipo','numero_peca','peso_bruto_kg','peso_entregador_usado_kg','peso_entrada_kg'],
  lancamentos:['id','lote_id','corte_codigo','peso_kg','preco_venda_kg','colaborador_id','origem','criado_em_dispositivo','codigo_barras_bruto']
 };
 function limpar(data,gestor){

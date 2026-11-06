@@ -386,7 +386,7 @@ button, input, select { font-family: var(--body); }
 }
 
 /* Confirmação de PIN: atividade real de login, sem percentual estimado. */
-.pin-status { width: 100%; max-width: 360px; margin: 18px auto 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.pin-status { scroll-margin-bottom: calc(100px + env(safe-area-inset-bottom)); width: 100%; max-width: 360px; margin: 18px auto 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .pin-status p { margin: 0 0 10px; color: var(--steel); font-size: 14px; font-weight: 600; }
 .pin-progresso { height: 7px; overflow: hidden; border-radius: 999px; background: #e2e8e3; }
 .pin-progresso-movimento { display: block; height: 100%; width: 36%; background: var(--success); border-radius: inherit; animation: pin-carregando 1.2s ease-in-out infinite; }
@@ -395,3 +395,5 @@ button, input, select { font-family: var(--body); }
 @media (prefers-reduced-motion: reduce) {
   .pin-progresso-movimento { animation: none; width: 100%; }
 }
+
+.nav-btn:disabled { opacity: .5; cursor: wait; }

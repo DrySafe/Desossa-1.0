@@ -27,6 +27,10 @@ são históricos. As migrações revisadas estão em `supabase/migrations`.
 - Cadastro de recebimento preserva o formato de registro único na API, confere
   fornecedor/recebedor/pesos antes de abrir as peças e mostra uma barra de atividade.
   A mesma tentativa mantém seu UUID para evitar duplicação após falha de confirmação.
+- Adicionar peça bloqueia peso, tipo, carregador e navegação durante a gravação,
+  com barra de atividade até a leitura de confirmação e atualização da lista.
+  Retentativas preservam UUID e número da peça; conflito com outra peça não é
+  tratado como sucesso. A consulta para escolher o número exige resposta do servidor.
 - Fila e histórico são salvos em uma única transação IndexedDB. Erros de validação
   não descartam registros. Conflito de UUID só é confirmado se o conteúdo for igual.
 - Login por PIN existente verificado no servidor, sem baixar hashes aos aparelhos.
