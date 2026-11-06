@@ -8,7 +8,7 @@ const uid='00000000-0000-4000-8000-000000000001',rid='00000000-0000-4000-8000-00
 const pessoa={id:uid,nome:'Pessoa Teste',ativo:true,nivel_acesso:'operador'};
 const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PATINHO',preco_venda_kg:20,ativo:true}],recebimentos:[{id:rid,fornecedor:'Fornecedor Teste',status:'aberto',data_entrada:isoLocal()}],vw_rendimento_lote:[{lote_id:pid,recebimento_id:rid,tipo:'traseiro',numero_peca:1,peso_liquido_kg:100,peso_total_desossado:0}],vw_recebimentos_progresso:[],vw_lancamentos_detalhado:[],vw_relatorio_pecas:[{lote_id:pid,tipo:'traseiro',numero_peca:1,fornecedor:'<img src=x onerror=alert(1)>',data_referencia:isoLocal(),peso_liquido_kg:100,peso_carne_kg:80,peso_sebo_osso_kg:10,peso_quebra_kg:10,preco_kg_custo:10,valor_estimado:1602,status_recebimento:'finalizado'}]};
 (async()=>{
- let inserted=[],tentativasLogin=0,trocasUsuario=0;
+ let inserted=[],tentativasLogin=0,trocasUsuario=0,papelSessao='gestor';
  let liberarLogin,recebeuLogin,liberarCache,recebeuCache;
  const loginSuspenso=new Promise(r=>liberarLogin=r),loginRecebido=new Promise(r=>recebeuLogin=r);
  const cacheSuspenso=new Promise(r=>liberarCache=r),cacheRecebido=new Promise(r=>recebeuCache=r);
@@ -28,12 +28,13 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
   const chunks=[];for await(const c of req)chunks.push(c);const body=Buffer.concat(chunks).toString();
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
   if(u.pathname==='/api/session'){
-   if(req.method==='GET')return res.end(JSON.stringify({colaboradores:[pessoa],role:'gestor',authenticated:true}));
-   if(req.method==='DELETE'){trocasUsuario++;return res.end(JSON.stringify({ok:true}));}
+   if(req.method==='GET')return res.end(JSON.stringify({colaboradores:[pessoa],role:papelSessao,authenticated:!!papelSessao}));
+   if(req.method==='DELETE'){trocasUsuario++;papelSessao=null;return res.end(JSON.stringify({ok:true}));}
    tentativasLogin++;
    if(JSON.parse(body).pin==='0000'){res.statusCode=401;return res.end(JSON.stringify({message:'Credenciais inválidas.'}));}
    recebeuLogin();await loginSuspenso;
-   return res.end(JSON.stringify({ok:true,usuario:pessoa,role:'operador'}));
+   papelSessao=['gestor','admin'].includes(pessoa.nivel_acesso)?'gestor':'operador';
+   return res.end(JSON.stringify({ok:true,usuario:pessoa,role:papelSessao}));
   }
   const query=new URL(u.searchParams.get('path'),'https://test.invalid'),table=query.pathname.split('/').pop();
   const single=req.headers.accept==='application/vnd.pgrst.object+json';
@@ -81,6 +82,13 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const base='http://127.0.0.1:'+server.address().port;
  await page.goto(base);await page.getByText('Quem é você?').waitFor();
+ assert.equal(trocasUsuario,1,'a abertura encerra o cookie de gestor anterior');
+ assert.equal(papelSessao,null);
+ assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),false);
+ await page.evaluate(()=>irPara('admin'));
+ await page.waitForFunction(()=>location.hash==='#login');
+ assert.equal(await page.locator('[data-aba=cortes]').count(),0);
+ assert.equal(await page.locator('#admin-senha').count(),0);
  // Tema segue o aparelho até a escolha explícita; escolha persiste ao recarregar.
  await page.emulateMedia({colorScheme:'dark'});
  await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
@@ -89,6 +97,8 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await page.locator('[data-theme-toggle]').click();
  assert.equal(await page.locator('[data-theme-toggle]').getAttribute('aria-pressed'),'true');
  await page.reload();await page.getByText('Quem é você?').waitFor();
+ assert.equal(trocasUsuario,2);
+ assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),false);
  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
  assert.equal(await page.locator('[data-theme-toggle]').textContent(),'Modo claro');
  await page.locator('[data-theme-toggle]').click();
@@ -260,7 +270,18 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await page.evaluate(()=>irPara('lancar'));await page.locator('#btn-meu-perfil').waitFor();
 
  assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),false);
- await page.evaluate(()=>{state.usuario.nivel_acesso='gestor';renderLancar()});
+ await page.evaluate(()=>irPara('admin'));
+ await page.waitForFunction(()=>location.hash==='#lancar');
+ assert.equal(await page.locator('[data-aba=cortes]').count(),0);
+ assert.equal(await page.locator('#admin-senha').count(),0);
+ // O acesso positivo também passa pelo PIN real da interface, sem alterar o state.
+ await page.locator('#btn-trocar-usuario').click();
+ await page.getByText('Quem é você?').waitFor();
+ pessoa.nivel_acesso='gestor';
+ await page.locator('.login-card').click();
+ assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),false);
+ for(const n of '1234')await page.locator('[data-tecla="'+n+'"]').click();
+ await page.locator('#btn-meu-perfil').waitFor();
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),true);
  const gestorFixo=await page.locator('#btn-acesso-gestor').boundingBox();
@@ -273,8 +294,21 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await page.setViewportSize({width:1280,height:720});
  await page.locator('#btn-acesso-gestor').click();
  await page.locator('[data-aba="cortes"]').waitFor();
+ assert.equal(await page.locator('#admin-senha').count(),0);
+ assert.equal(tentativasLogin,3,'gestor não precisa autenticar novamente para abrir a área');
  await page.evaluate(()=>irPara('lancar'));
  await page.locator('#btn-meu-perfil').waitFor();
+ await page.route('**/api/session',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({message:'Falha fictícia'})}));
+ await page.locator('#btn-acesso-gestor').click();
+ await page.waitForFunction(()=>location.hash==='#lancar');
+ assert.equal(await page.locator('[data-aba=cortes]').count(),0);
+ await page.unroute('**/api/session');
+ // Um privilégio revogado no servidor não pode usar a autorização anterior da tela.
+ papelSessao='operador';
+ await page.locator('#btn-acesso-gestor').click();
+ await page.waitForFunction(()=>location.hash==='#lancar'&&state.usuario.nivel_acesso==='operador');
+ assert.equal(await page.locator('[data-aba=cortes]').count(),0);
+ assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),false);
  await context.setOffline(true);
  await page.evaluate(async({pid})=>{state.loteAtivo={id:pid,tipo:"traseiro",numero_peca:1,peso_entrada_kg:100};await salvarLancamento({codigo:'00123',nome:'PATINHO',peso:1.234,preco:20},'manual')},{pid});
  assert.equal(await page.evaluate(async()=>(await idbGetAll(STORES.fila)).length),1);
@@ -314,12 +348,21 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await page.locator('#btn-meu-perfil').waitFor();
  await page.setViewportSize({width:1280,height:720});
  await page.locator('[data-theme-toggle]').click();
+ const trocasAntesSair=trocasUsuario;
  await page.locator('#btn-trocar-usuario').click();
  await page.getByText('Quem é você?').waitFor();
- assert.equal(trocasUsuario,1);
+ assert.equal(trocasUsuario,trocasAntesSair+1);
  assert.equal(await page.evaluate(()=>state.usuario),null);
  assert.equal(await page.evaluate(()=>adminAutenticado),false);
  assert.equal(await page.locator('#btn-trocar-usuario').isVisible(),false);
+ assert.equal(await page.locator('#btn-acesso-gestor').isVisible(),false);
+ await page.goto(base+'/painel-gestor.html');
+ await page.locator('#portao-voltar').waitFor({state:'visible'});
+ assert.equal(await page.locator('#painel').isVisible(),false);
+ await page.goto(base);await page.getByText('Quem é você?').waitFor();
+ await page.locator('.login-card').click();
+ for(const n of '1234')await page.locator('[data-tecla="'+n+'"]').click();
+ await page.locator('#btn-meu-perfil').waitFor();
  await page.goto(base+'/painel-gestor.html');
  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
  assert.equal(await page.locator('input[type=password]').count(),0);
@@ -388,6 +431,6 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await falhaSessao.waitForFunction(()=>document.querySelectorAll('.kpi-card').length===9);
  await falhaSessao.close();
  assert.deepEqual(errors,[]);
- console.log('PASS: login, histórico mensal/três abas/ordenação, fila offline/transação/reenvio, backup, CSP, leitura EAN por imagem, câmera simulada/encerramento, relatório, XSS e erro de consulta. Zero conexões externas reais.');
+ console.log('PASS: login/permissão do gestor/rota direta/revogação, histórico mensal/três abas/ordenação, fila offline/transação/reenvio, backup, CSP, leitura EAN por imagem, câmera simulada/encerramento, relatório, XSS e erro de consulta. Zero conexões externas reais.');
  }finally{liberarLogin();liberarCache();liberarCadastro();liberarConferencia();liberarPeca();liberarConferenciaPeca();await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -37,6 +37,8 @@ são históricos. As migrações revisadas estão em `supabase/migrations`.
   A API usa cookie HttpOnly/Secure/SameSite e verifica permissões e usuários ativos.
   Operador não pode enviar pendência de outra pessoa nem acessar custos/auditoria.
   Entrada exige conexão; depois do login é possível registrar cortes offline.
+  A tela inicial encerra também o cookie da sessão anterior. O atalho do gestor
+  só aparece após o PIN de um gestor; a rota verifica novamente a permissão no servidor.
   A senha de contingência do gestor é exclusiva de testes e fica somente no servidor.
   O painel reutiliza a sessão de gestor, sem pedir senha novamente; confere o nível
   atual no servidor e solicita retorno ao app se a sessão expirou ou não tem permissão.

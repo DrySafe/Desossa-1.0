@@ -38,12 +38,15 @@ function fmtDataLocal(data) {
 
 // A barra é permanente; as ações respeitam a sessão e o salvamento em andamento.
 let bloqueiosNavegacao = 0;
+function usuarioEhGestor() {
+  return !!state.usuario && ['gestor', 'admin'].includes(state.usuario.nivel_acesso);
+}
 function atualizarBarraSuperior() {
   const gestor = document.getElementById('btn-acesso-gestor');
   const trocar = document.getElementById('btn-trocar-usuario');
-  const podeVerGestor = state.usuario ? ['gestor', 'admin'].includes(state.usuario.nivel_acesso) : !state.candidatoLogin;
+  const podeVerGestor = usuarioEhGestor() && !autenticandoPin;
   gestor.classList.toggle('hidden', !podeVerGestor);
-  trocar.classList.toggle('hidden', !state.usuario && !adminAutenticado);
+  trocar.classList.toggle('hidden', !state.usuario);
   gestor.setAttribute('aria-current', location.hash === '#admin' ? 'page' : 'false');
   document.querySelectorAll('[data-app-navigation], #bottom-nav button').forEach(botao => {
     botao.disabled = bloqueiosNavegacao > 0 || autenticandoPin;
@@ -1607,35 +1610,33 @@ let abaAdminAtual = "cortes";
 
 async function renderAdmin() {
   nav.classList.add("hidden");
-  if (!adminAutenticado) {
-    try { const s = await sessaoAPI(null,"GET"); adminAutenticado = s.role === "gestor"; } catch {}
-    if (!adminAutenticado) return renderAdminLogin();
+  adminAutenticado = false;
+  if (!usuarioEhGestor() || autenticandoPin) {
+    return irPara(state.usuario ? 'lancar' : 'login');
   }
-  renderAdminShell();
-}
-
-function renderAdminLogin() {
-  atualizarBarraSuperior();
-  el.innerHTML = sanitizarHTML(`
-    <div class="screen pin-screen">
-      <button class="voltar" id="admin-voltar">‹ Voltar</button>
-      <h2 class="pin-nome">Área do gestor</h2>
-      <p class="pin-label">Digite a senha</p>
-      <input type="password" id="admin-senha" class="select-grande" />
-      <button class="botao-grande botao-confirmar" id="admin-entrar">Entrar</button>
-    </div>
-  `);
-  document.getElementById("admin-voltar").addEventListener("click", () => irPara("login"));
-  document.getElementById("admin-entrar").addEventListener("click", async () => {
-    try {
-      await sessaoAPI({ adminPassword: document.getElementById("admin-senha").value });
-      adminAutenticado = true;
-      renderAdminShell();
-    } catch (err) { alert(err.message); }
-  });
+  const usuarioId = state.usuario.id;
+  el.innerHTML = sanitizarHTML('<div class="screen"><p role="status">Verificando acesso do gestor…</p></div>');
+  try {
+    const sessao = await sessaoAPI(null, 'GET');
+    if (state.usuario?.id !== usuarioId || location.hash !== '#admin') return;
+    if (!sessao.authenticated) return trocarUsuario();
+    if (sessao.role !== 'gestor') {
+      state.usuario.nivel_acesso = 'operador';
+      atualizarBarraSuperior();
+      mostrarToast('Área restrita a gestores.');
+      return irPara('lancar');
+    }
+    adminAutenticado = true;
+    renderAdminShell();
+  } catch {
+    if (state.usuario?.id !== usuarioId || location.hash !== '#admin') return;
+    mostrarToast('Não foi possível verificar sua permissão. Tente novamente.');
+    irPara('lancar');
+  }
 }
 
 function renderAdminShell() {
+  if (!usuarioEhGestor() || !adminAutenticado) return irPara(state.usuario ? 'lancar' : 'login');
   atualizarBarraSuperior();
   el.innerHTML = sanitizarHTML(`
     <div class="screen admin-screen">
@@ -2116,13 +2117,17 @@ async function registrarSincronizacaoSegundoPlano() {
 
 // ---------- Bootstrap ----------
 async function bootstrap() {
-  // Força limpar a sessão ao abrir/recarregar para sempre exigir o login com PIN
+  // A tela de login encerra também o cookie, não só a identificação local.
   await limparSessao();
   state.usuario = null;
   state.loteAtivo = null;
+  state.candidatoLogin = null;
+  adminAutenticado = false;
+  sincronizacaoAutorizada = false;
 
   let online = false;
   try {
+    await sessaoAPI(null, 'DELETE');
     const acesso = await sessaoAPI(null, "GET");
     await idbClearReplace(STORES.colaboradores, acesso.colaboradores);
     online = true;
