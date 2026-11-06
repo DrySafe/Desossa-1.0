@@ -81,7 +81,7 @@ function criarClienteTeste() {
         if (!url.pathname.startsWith("/rest/v1/")) throw new Error("Endpoint não permitido no cliente.");
         const headers = {};
         const origem = new Headers(init.headers || (typeof input === "object" ? input.headers : {}));
-        for (const nome of ["content-type", "prefer", "range", "range-unit"]) if (origem.has(nome)) headers[nome] = origem.get(nome);
+        for (const nome of ["content-type", "accept", "prefer", "range", "range-unit"]) if (origem.has(nome)) headers[nome] = origem.get(nome);
         const method = init.method || input.method || "GET";
         const body = init.body ?? (typeof input === "object" && !["GET","HEAD"].includes(method) ? await input.clone().text() : undefined);
         return fetch("/api/database?path=" + encodeURIComponent(url.pathname + url.search), {

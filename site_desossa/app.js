@@ -23,7 +23,10 @@ const state = {
   candidatoLogin: null   // colaborador escolhido na grade, aguardando PIN
 };
 
-function fmtKg(n) { return (Math.round((n + Number.EPSILON) * 1000) / 1000).toLocaleString("pt-BR", { minimumFractionDigits: 3 }); }
+function fmtKg(n) {
+  if (n == null || n === '' || !Number.isFinite(Number(n))) return '—';
+  return (Math.round((Number(n) + Number.EPSILON) * 1000) / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
 function fmtR$(n) { return (n ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
 
 function fmtDataLocal(data) {
@@ -1212,8 +1215,8 @@ function renderNovoRecebimento() {
         <input name="placa_veiculo" placeholder="Placa do veículo" />
         <input name="fiscal_prevencao" placeholder="Fiscal de prevenção" />
         <input name="acougueiro_acompanhante" placeholder="Açougueiro que acompanhou" />
-        <input name="peso_entregador_1_kg" type="number" step="0.001" placeholder="Peso entregador 1 (kg)" required />
-        <input name="peso_entregador_2_kg" type="number" step="0.001" placeholder="Peso entregador 2 (kg)" />
+        <input name="peso_entregador_1_kg" type="number" min="0.001" step="0.001" placeholder="Peso entregador 1 (kg)" required />
+        <input name="peso_entregador_2_kg" type="number" min="0.001" step="0.001" placeholder="Peso entregador 2 (kg)" />
         <label class="rotulo-campo">Quantas peças vêm nesse recebimento?</label>
         <div class="linha-quantidade">
           <div class="campo-quantidade">
@@ -1227,14 +1230,35 @@ function renderNovoRecebimento() {
         </div>
         <button type="submit" class="botao-grande botao-confirmar">Salvar e adicionar peças</button>
       </form>
+      <div id="recebimento-status" class="pin-status hidden" role="status" aria-live="polite" aria-atomic="true">
+        <p id="recebimento-status-texto">Salvando recebimento…</p>
+        <div class="pin-progresso" role="progressbar" aria-label="Salvando recebimento">
+          <span class="pin-progresso-movimento" aria-hidden="true"></span>
+        </div>
+      </div>
+      <p id="recebimento-erro" class="pin-erro hidden" role="alert"></p>
     </div>
   `);
   document.getElementById("rec-voltar").addEventListener("click", () => irPara("lote"));
+  const idRecebimento = crypto.randomUUID();
+  let salvando = false;
   document.getElementById("form-recebimento").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
+    if (salvando) return;
+    const form = e.target, f = new FormData(form);
+    const botao = form.querySelector('button[type="submit"]'), textoBotao = botao.textContent;
+    const status = document.getElementById('recebimento-status'), erro = document.getElementById('recebimento-erro');
+    const statusTexto = document.getElementById('recebimento-status-texto');
+    salvando = true;
+    form.setAttribute('aria-busy', 'true');
+    form.querySelectorAll('input,button').forEach(campo => { campo.disabled = true; });
+    document.getElementById('rec-voltar').disabled = true;
+    botao.textContent = 'Salvando…';
+    erro.classList.add('hidden'); status.classList.remove('hidden');
+    status.scrollIntoView({block:'nearest',behavior:'auto'});
     try {
       const rec = await criarRecebimento({
+        id: idRecebimento,
         fornecedor: f.get("fornecedor").trim(),
         placa_veiculo: f.get("placa_veiculo").trim() || null,
         fiscal_prevencao: f.get("fiscal_prevencao").trim() || null,
@@ -1245,12 +1269,22 @@ function renderNovoRecebimento() {
         quantidade_dianteiro_esperada: parseInt(f.get("quantidade_dianteiro_esperada"), 10) || 0,
         quantidade_traseiro_esperada: parseInt(f.get("quantidade_traseiro_esperada"), 10) || 0,
         status: "aberto"
-      });
+      }, mensagem => { statusTexto.textContent = mensagem; });
+      if (!form.isConnected) return;
       state.recebimentos = await idbGetAll(STORES.recebimentos);
+      state.colaboradores = await idbGetAll(STORES.colaboradores);
       state.recebimentoEmEdicao = rec;
       irPara("add-pecas");
     } catch (err) {
-      alert("Não consegui salvar o recebimento (precisa de internet nessa etapa). " + err.message);
+      erro.textContent = 'Não foi possível concluir a confirmação. ' + err.message;
+      erro.classList.remove('hidden');
+    } finally {
+      salvando = false;
+      form.setAttribute('aria-busy', 'false');
+      form.querySelectorAll('input,button').forEach(campo => { campo.disabled = false; });
+      if (form.isConnected) document.getElementById('rec-voltar').disabled = false;
+      botao.textContent = textoBotao;
+      status.classList.add('hidden');
     }
   });
 }

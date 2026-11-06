@@ -20,3 +20,15 @@ test('consulta de sessão usa o nível atual e não o papel antigo do cookie',as
 test('colaborador inativo perde a sessão',async()=>{mock(url=>url.includes('select=id,ativo,nivel_acesso')?json([{id:uid,ativo:false,nivel_acesso:'gestor'}]):json([]));const r=response();await session(request('GET',null,lib.sign({uid,role:'gestor'})),r);assert.equal(r.data.authenticated,false);assert.equal(r.data.role,null);assert.match(r.headers['set-cookie'],/Max-Age=0/)});
 test('sessão expirada não informa privilégio de gestor',async()=>{mock(()=>json([]));const p=Buffer.from(JSON.stringify({uid,role:'gestor',exp:Date.now()-1000})).toString('base64url'),signature=crypto.createHmac('sha256',process.env.DESOSSA_TEST_SESSION_SECRET).update(p).digest('base64url');const r=response();await session(request('GET',null,p+'.'+signature),r);assert.equal(r.data.authenticated,false);assert.equal(r.data.role,null)});
 test('relatório continua bloqueado no servidor para operador',async()=>{const calls=mock(()=>json([{id:uid,ativo:true,nivel_acesso:'operador'}]));const req=request('GET',null,lib.sign({uid,role:'gestor'}));req.query.path='/rest/v1/vw_relatorio_pecas?select=*';const r=response();await database(req,r);assert.equal(r.statusCode,403);assert.equal(calls.length,1)});
+test('operador cadastra recebimento aberto e recebe objeto único completo',async()=>{
+ const dados={id:'r',fornecedor:'Fornecedor Teste',status:'aberto',colaborador_recebeu_id:'outro',peso_entregador_1_kg:70.5,peso_entregador_2_kg:65.25};
+ const calls=mock((url,options)=>{
+  if(url.includes('select=id,ativo,nivel_acesso'))return json([{id:uid,ativo:true,nivel_acesso:'operador'}]);
+  assert.equal(options.headers.accept,'application/vnd.pgrst.object+json');
+  const body=JSON.parse(options.body);assert.equal(body.colaborador_recebeu_id,uid);assert.equal(body.status,'aberto');return json(body,201);
+ });
+ const req=request('POST',dados,lib.sign({uid,role:'operador'}));req.query.path='/rest/v1/recebimentos?select=*';req.headers.accept='application/vnd.pgrst.object+json';req.headers.prefer='return=representation';
+ const r=response();await database(req,r);assert.equal(r.statusCode,201);assert.equal(Array.isArray(r.data),false);assert.equal(r.data.fornecedor,'Fornecedor Teste');assert.equal(r.data.peso_entregador_1_kg,70.5);assert.equal(calls.length,2);
+});
+test('operador não pode criar recebimento já finalizado',async()=>{const calls=mock(()=>json([{id:uid,ativo:true,nivel_acesso:'operador'}]));const req=request('POST',{fornecedor:'Teste',peso_entregador_1_kg:70,status:'finalizado'},lib.sign({uid,role:'operador'}));req.query.path='/rest/v1/recebimentos';const r=response();await database(req,r);assert.equal(r.statusCode,403);assert.equal(calls.length,1)});
+test('peso de carregador inválido é rejeitado antes da gravação',async()=>{const calls=mock(()=>json([]));const req=request('POST',{fornecedor:'Teste',peso_entregador_1_kg:null},lib.sign({uid:null,role:'gestor'}));req.query.path='/rest/v1/recebimentos';const r=response();await database(req,r);assert.equal(r.statusCode,400);assert.equal(calls.length,0)});

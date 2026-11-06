@@ -24,6 +24,9 @@ são históricos. As migrações revisadas estão em `supabase/migrations`.
   sem encerrar a sessão de gestor. Impressão é bloqueada quando os dados não estão confirmados.
 - Toda consulta do painel verifica erros, contagem e paginação. Uma falha impede
   exportar totais; não transforma erro em zero. Nomes são tratados como texto.
+- Cadastro de recebimento preserva o formato de registro único na API, confere
+  fornecedor/recebedor/pesos antes de abrir as peças e mostra uma barra de atividade.
+  A mesma tentativa mantém seu UUID para evitar duplicação após falha de confirmação.
 - Fila e histórico são salvos em uma única transação IndexedDB. Erros de validação
   não descartam registros. Conflito de UUID só é confirmado se o conteúdo for igual.
 - Login por PIN existente verificado no servidor, sem baixar hashes aos aparelhos.

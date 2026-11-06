@@ -71,12 +71,38 @@ async function garantirDataDesossa(lote) {
 // ---------- Recebimento (colaborador cadastra a chegada da carne) ----------
 // Diferente do lançamento de cortes, isso precisa de conexão (não entra na fila offline por enquanto,
 // já que normalmente é feito no recebimento/doca, onde o sinal costuma ser melhor que na desossa).
-async function criarRecebimento(dados) {
+function registroConfirmado(data, campos) {
+  const registro = Array.isArray(data) && data.length === 1 ? data[0] : data;
+  if (!registro || Array.isArray(registro) || !registro.id || campos.some(campo => registro[campo] == null)) {
+    throw new Error('O banco respondeu ao cadastro, mas o registro retornado está incompleto. Atualize a lista para conferir antes de cadastrar novamente.');
+  }
+  return registro;
+}
+
+async function criarRecebimento(dados, progresso = () => {}) {
+  if (!dados.fornecedor?.trim()) throw new Error('Informe o fornecedor.');
+  if (!Number.isFinite(dados.peso_entregador_1_kg) || dados.peso_entregador_1_kg <= 0) throw new Error('Informe um peso válido para o carregador 1.');
+  if (dados.peso_entregador_2_kg != null && (!Number.isFinite(dados.peso_entregador_2_kg) || dados.peso_entregador_2_kg <= 0)) throw new Error('Informe um peso válido para o carregador 2.');
+  const payload = { ...dados, id: dados.id || crypto.randomUUID() };
   const sb = getSupabase();
-  const { data, error } = await sb.from("recebimentos").insert(dados).select().single();
-  if (error) throw error;
+  progresso('Salvando recebimento…');
+  const { error } = await sb.from('recebimentos').insert(payload).select().single();
+  if (error && error.code !== '23505') throw error;
+  progresso('Conferindo dados salvos…');
+  const { data, error: erroConfirmacao } = await sb.from('recebimentos').select('*').eq('id', payload.id).single();
+  if (erroConfirmacao) throw new Error('O envio foi recebido, mas não foi possível confirmar os dados. Tente confirmar novamente neste formulário ou confira a lista de recebimentos.');
+  const registro = registroConfirmado(data, ['fornecedor', 'peso_entregador_1_kg', 'colaborador_recebeu_id']);
+  for (const campo of ['fornecedor','placa_veiculo','fiscal_prevencao','acougueiro_acompanhante','colaborador_recebeu_id']) {
+    if (String(registro[campo] ?? '') !== String(payload[campo] ?? '')) throw new Error('O recebimento já existe com dados diferentes. Confira a lista antes de cadastrar novamente.');
+  }
+  for (const campo of ['peso_entregador_1_kg','peso_entregador_2_kg','quantidade_dianteiro_esperada','quantidade_traseiro_esperada']) {
+    if ((registro[campo] == null) !== (payload[campo] == null) || Number(registro[campo]) !== Number(payload[campo])) throw new Error('Os dados salvos não conferem com o formulário. Confira o recebimento na lista.');
+  }
+  if (registro.status !== 'aberto') throw new Error('Este recebimento já foi encerrado. Confira a lista antes de continuar.');
+  progresso('Atualizando o aplicativo…');
+  await idbPut(STORES.recebimentos, registro);
   await atualizarCacheReferencia();
-  return data;
+  return registro;
 }
 
 // Busca as peças de um recebimento DIRETO do banco (sem cache) — importante pra calcular o
@@ -95,6 +121,7 @@ async function buscarPecasDoRecebimento(recebimentoId) {
 }
 
 async function adicionarPeca(recebimentoId, { tipo, numero_peca, peso_bruto_kg, peso_entregador_usado_kg }) {
+  if (!Number.isFinite(peso_bruto_kg) || !Number.isFinite(peso_entregador_usado_kg) || peso_bruto_kg <= 0 || peso_entregador_usado_kg < 0 || peso_bruto_kg <= peso_entregador_usado_kg) throw new Error('Confira os pesos: o peso bruto deve ser maior que o peso do carregador.');
   const peso_entrada_kg = Math.round((peso_bruto_kg - peso_entregador_usado_kg) * 1000) / 1000;
   const sb = getSupabase();
   const { data, error } = await sb.from("lotes").insert({
@@ -102,8 +129,9 @@ async function adicionarPeca(recebimentoId, { tipo, numero_peca, peso_bruto_kg, 
     tipo, numero_peca, peso_bruto_kg, peso_entregador_usado_kg, peso_entrada_kg
   }).select().single();
   if (error) throw error;
+  const registro = registroConfirmado(data, ['recebimento_id', 'peso_entrada_kg']);
   await atualizarCacheReferencia();
-  return data;
+  return registro;
 }
 
 async function atualizarPrecosRecebimento(id, preco_kg_dianteiro, preco_kg_traseiro, data_entrada) {

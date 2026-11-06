@@ -12,6 +12,10 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  let liberarLogin,recebeuLogin,liberarCache,recebeuCache;
  const loginSuspenso=new Promise(r=>liberarLogin=r),loginRecebido=new Promise(r=>recebeuLogin=r);
  const cacheSuspenso=new Promise(r=>liberarCache=r),cacheRecebido=new Promise(r=>recebeuCache=r);
+ let liberarCadastro,recebeuCadastro,liberarConferencia,recebeuConferencia;
+ const cadastroSuspenso=new Promise(r=>liberarCadastro=r),cadastroRecebido=new Promise(r=>recebeuCadastro=r);
+ const conferenciaSuspensa=new Promise(r=>liberarConferencia=r),conferenciaRecebida=new Promise(r=>recebeuConferencia=r);
+ const novosRecebimentos=[],headersSingle=[];let enviosRecebimento=0,leiturasConfirmacao=0;
  const root=path.resolve('dist');
  const server=http.createServer(async(req,res)=>{
  const u=new URL(req.url,'http://localhost');
@@ -26,9 +30,30 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
    return res.end(JSON.stringify({ok:true,usuario:pessoa,role:'operador'}));
   }
   const query=new URL(u.searchParams.get('path'),'https://test.invalid'),table=query.pathname.split('/').pop();
+  const single=req.headers.accept==='application/vnd.pgrst.object+json';
+  if(req.method==='POST'&&table==='recebimentos'){
+   enviosRecebimento++;headersSingle.push(req.headers.accept);
+   const payload=JSON.parse(body);
+   if(novosRecebimentos.some(r=>r.id===payload.id)){res.statusCode=409;return res.end(JSON.stringify({code:'23505',message:'Registro já gravado'}));}
+   recebeuCadastro();await cadastroSuspenso;
+   const row={...payload,data_entrada:isoLocal()};novosRecebimentos.push(row);datasets.recebimentos.push(row);
+   res.statusCode=201;return res.end(JSON.stringify(single?row:[row]));
+  }
+  if(req.method==='GET'&&table==='recebimentos'&&novosRecebimentos.length&&query.searchParams.has('id')&&query.searchParams.get('id').slice(3)===novosRecebimentos[0].id){
+   headersSingle.push(req.headers.accept);leiturasConfirmacao++;recebeuConferencia();await conferenciaSuspensa;
+   if(leiturasConfirmacao===1){res.statusCode=400;return res.end(JSON.stringify({code:'TEST_CONFIRMATION_FAILURE',message:'Falha fictícia na confirmação'}));}
+   return res.end(JSON.stringify(single?novosRecebimentos[0]:[novosRecebimentos[0]]));
+  }
+  if(req.method==='POST'&&table==='lotes'){
+   headersSingle.push(req.headers.accept);const row={...JSON.parse(body),id:require('node:crypto').randomUUID(),status:'aberto'};
+   datasets.lotes??=[];datasets.lotes.push(row);datasets.vw_rendimento_lote.push({lote_id:row.id,recebimento_id:row.recebimento_id,tipo:row.tipo,numero_peca:row.numero_peca,peso_liquido_kg:row.peso_entrada_kg,peso_total_desossado:0,status_lote:'aberto'});
+   res.statusCode=201;return res.end(JSON.stringify(single?row:[row]));
+  }
   if(req.method==='POST'&&table==='lancamentos'){inserted.push(JSON.parse(body));return res.end('');}
   if(req.method==='GET'&&['colaboradores','cortes_catalogo','recebimentos','vw_rendimento_lote'].includes(table)){recebeuCache();await cacheSuspenso;}
-  const data=datasets[table]||[];res.setHeader('Content-Range','0-'+Math.max(data.length-1,0)+'/'+data.length);
+  let data=datasets[table]||[];
+  for(const key of ['id','recebimento_id'])if(query.searchParams.get(key)?.startsWith('eq.'))data=data.filter(row=>String(row[key])===query.searchParams.get(key).slice(3));
+  res.setHeader('Content-Range','0-'+Math.max(data.length-1,0)+'/'+data.length);
   return res.end(JSON.stringify(data));
  }
  const file=path.join(root,u.pathname==='/'?'index.html':u.pathname);
@@ -76,6 +101,48 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await page.setViewportSize({width:1280,height:720});
  assert.equal(tentativasLogin,2);
  assert.equal(await page.evaluate(()=>state.usuario.id),uid);
+ // Regressão: salvar, conferir e adicionar peça sem undefined/NaN ou duplicação no retry.
+ await page.evaluate(()=>irPara('novo-recebimento'));
+ await page.locator('[name=fornecedor]').fill('Fornecedor Cadastro Teste');
+ await page.locator('[name=placa_veiculo]').fill('ABC1D23');
+ await page.locator('[name=fiscal_prevencao]').fill('Fiscal Teste');
+ await page.locator('[name=acougueiro_acompanhante]').fill('Acompanhante Teste');
+ await page.locator('[name=peso_entregador_1_kg]').fill('70.5');
+ await page.locator('[name=peso_entregador_2_kg]').fill('65.25');
+ await page.locator('[name=quantidade_dianteiro_esperada]').fill('1');
+ await page.locator('[name=quantidade_traseiro_esperada]').fill('1');
+ await page.locator('#form-recebimento button[type=submit]').click();await cadastroRecebido;
+ assert.equal(await page.locator('#recebimento-status').isVisible(),true);
+ assert.equal(await page.locator('#recebimento-status-texto').textContent(),'Salvando recebimento…');
+ assert.equal(await page.locator('#form-recebimento button[type=submit]').isDisabled(),true);
+ assert.equal(await page.locator('#form-peca').count(),0);
+ await page.evaluate(()=>document.querySelector('#form-recebimento').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+ assert.equal(enviosRecebimento,1);
+ liberarCadastro();await conferenciaRecebida;
+ assert.equal(await page.locator('#recebimento-status-texto').textContent(),'Conferindo dados salvos…');
+ assert.equal(await page.locator('#form-peca').count(),0);
+ liberarConferencia();
+ await page.locator('#recebimento-erro').waitFor({state:'visible'});
+ assert.equal(await page.locator('#form-recebimento button[type=submit]').isEnabled(),true);
+ assert.equal(novosRecebimentos.length,1);
+ await page.locator('#form-recebimento button[type=submit]').click();
+ await page.locator('#form-peca').waitFor();
+ assert.equal(novosRecebimentos.length,1);assert.equal(enviosRecebimento,2);
+ assert.equal(await page.locator('h2.titulo-tela').textContent(),'Fornecedor Cadastro Teste');
+ assert.ok((await page.locator('.pin-label').allTextContents()).join(' ').includes('Recebido por Pessoa Teste'));
+ const pesos=await page.locator('.pin-label').filter({hasText:'Peso entregador 1'}).innerText();assert.ok(pesos.includes('70,500 kg'));assert.ok(pesos.includes('65,250 kg'));
+ assert.equal(await page.evaluate(()=>fmtKg('70.5')),'70,500');assert.equal(await page.evaluate(()=>fmtKg(undefined)),'—');
+ await page.locator('#select-tipo-peca').selectOption('traseiro');
+ await page.getByText('Traseiro — peça número 1',{exact:true}).waitFor();
+ await page.locator('[name=peso_bruto_kg]').fill('165.25');
+ await page.locator('[name=entregador_usado]').selectOption('65.25');
+ await page.locator('#form-peca button[type=submit]').click();
+ await page.getByText('100,000 kg líquido',{exact:true}).waitFor();
+ assert.equal(datasets.lotes[0].peso_entrada_kg,100);
+ assert.ok(headersSingle.every(h=>h==='application/vnd.pgrst.object+json'));
+ assert.ok(!(await page.locator('#app').innerText()).match(/undefined|NaN/));
+ await page.evaluate(()=>irPara('lancar'));await page.locator('#btn-meu-perfil').waitFor();
+
  assert.equal(await page.locator('#btn-acesso-gestor').count(),0);
  await page.evaluate(()=>{state.usuario.nivel_acesso='gestor';renderLancar()});
  await page.locator('#btn-acesso-gestor').click();
@@ -176,5 +243,5 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await falhaSessao.close();
  assert.deepEqual(errors,[]);
  console.log('PASS: login, fila offline/transação/reenvio, backup, CSP, leitura EAN por imagem, câmera simulada/encerramento, relatório, XSS e erro de consulta. Zero conexões externas reais.');
- }finally{liberarLogin();liberarCache();await browser.close();await new Promise(r=>server.close(r));}
+ }finally{liberarLogin();liberarCache();liberarCadastro();liberarConferencia();await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1});

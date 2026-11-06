@@ -53,3 +53,9 @@ test('build gera somente site, sem SQL ou workflows',()=>{
  assert.ok(!fs.readdirSync('dist').some(n=>n.endsWith('.sql')));
  for(const name of fs.readdirSync('dist',{recursive:true}))if(fs.statSync('dist/'+name).isFile())assert.ok(!fs.readFileSync('dist/'+name,'utf8').includes('nypmvhsxvaqscswszwpr'));
 });
+test('cliente preserva formato single sem repassar credenciais',async()=>{
+ const {run,calls}=load({SUPABASE_ANON_KEY:'sb_publishable_test'});
+ await run('criarClienteTeste()').options.global.fetch(host+'/rest/v1/recebimentos?select=*',{method:'POST',headers:{accept:'application/vnd.pgrst.object+json',apikey:'ficticia',authorization:'Bearer ficticio','content-type':'application/json'},body:'{}'});
+ assert.equal(calls[0][1].headers.accept,'application/vnd.pgrst.object+json');
+ assert.equal(calls[0][1].headers.apikey,undefined);assert.equal(calls[0][1].headers.authorization,undefined);
+});

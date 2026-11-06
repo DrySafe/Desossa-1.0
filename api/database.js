@@ -1,7 +1,7 @@
 const c=require('../server/lib.cjs');
 const tables=new Set(['colaboradores','cortes_catalogo','recebimentos','lotes','lancamentos','exclusoes_log','auditoria_eventos','vw_rendimento_lote','vw_lancamentos_detalhado','vw_recebimentos_progresso','vw_lancamentos_completo','vw_relatorio_pecas']);
 const writes={
- recebimentos:['data_entrada','fornecedor','placa_veiculo','fiscal_prevencao','acougueiro_acompanhante','colaborador_recebeu_id','peso_entregador_1_kg','peso_entregador_2_kg','quantidade_dianteiro_esperada','quantidade_traseiro_esperada'],
+ recebimentos:['id','data_entrada','fornecedor','placa_veiculo','fiscal_prevencao','acougueiro_acompanhante','colaborador_recebeu_id','peso_entregador_1_kg','peso_entregador_2_kg','quantidade_dianteiro_esperada','quantidade_traseiro_esperada','status'],
  lotes:['recebimento_id','tipo','numero_peca','peso_bruto_kg','peso_entregador_usado_kg','peso_entrada_kg'],
  lancamentos:['id','lote_id','corte_codigo','peso_kg','preco_venda_kg','colaborador_id','origem','criado_em_dispositivo','codigo_barras_bruto']
 };
@@ -36,10 +36,19 @@ module.exports=async(req,res)=>{
   if(!gestor){
    if(method==='POST'&&writes[table]){
     if(Object.keys(body).some(k=>!writes[table].includes(k)))throw c.error(403,'Campo não permitido.');
-    if(table==='recebimentos')body={...body,colaborador_recebeu_id:s.uid};
+    if(table==='recebimentos'){
+     if(body.status!==undefined&&body.status!=='aberto')throw c.error(403,'Novo recebimento deve estar aberto.');
+     body={...body,status:'aberto',colaborador_recebeu_id:s.uid};
+    }
     if(table==='lotes'&&!body.recebimento_id)throw c.error(400,'Novas peças precisam de recebimento.');
     if(table==='lancamentos'&&body.colaborador_id!==s.uid)throw c.error(403,'Esta pendência pertence a outro colaborador. Entre com o usuário original para enviar.');
    }else if(!(method==='PATCH'&&table==='lotes'&&Object.keys(body).length===1&&typeof body.data_desossa==='string'&&u.searchParams.get('data_desossa')==='is.null'))throw c.error(403,'Operação de gestor necessária.');
+  }
+  if(method==='POST'&&table==='recebimentos'){
+   if(typeof body.fornecedor!=='string'||!body.fornecedor.trim())throw c.error(400,'Informe o fornecedor.');
+   if(body.peso_entregador_1_kg==null||!Number.isFinite(Number(body.peso_entregador_1_kg))||Number(body.peso_entregador_1_kg)<=0)throw c.error(400,'Informe um peso válido para o carregador 1.');
+   if(body.peso_entregador_2_kg!=null&&(!Number.isFinite(Number(body.peso_entregador_2_kg))||Number(body.peso_entregador_2_kg)<=0))throw c.error(400,'Informe um peso válido para o carregador 2.');
+   if(s.uid)body={...body,colaborador_recebeu_id:s.uid};
   }
   if(table.startsWith('vw_'))throw c.error(403,'Relatório é somente leitura.');
   if(method==='DELETE')throw c.error(403,'Use a exclusão transacional com auditoria.');
@@ -47,6 +56,10 @@ module.exports=async(req,res)=>{
   if(table==='exclusoes_log')throw c.error(403,'Histórico de exclusões é somente leitura.');
  }
  const headers={'x-desossa-ator':s.uid || 'gestor'};
+ if(req.headers.accept){
+  if(!['application/json','application/vnd.pgrst.object+json','*/*'].includes(req.headers.accept))throw c.error(400,'Formato de resposta não permitido.');
+  headers.accept=req.headers.accept;
+ }
  if(req.headers.prefer){
   const prefer=req.headers.prefer.split(',').map(v=>v.trim());
   if(prefer.some(v=>! /^(return=(representation|minimal)|count=exact)$/.test(v)))throw c.error(400,'Preferência de operação não permitida.');
