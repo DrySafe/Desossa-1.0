@@ -9,7 +9,8 @@ el.addEventListener("click", (event) => {
   if (acao === "imprimir") window.print();
 });
 
-let abaLoteAtual = "abertos"; // Guarda a aba selecionada pelo usuário (abertos x concluidos)
+let abaLoteAtual = "abertos"; // "abertos" | "concluidos" | "finalizados"
+let mesFiltroLote = null;
 
 const state = {
   usuario: null,        // colaborador logado
@@ -1052,20 +1053,30 @@ function chaveSemana(dataStr) {
 function renderLote() {
   const todosRecebimentos = state.recebimentos;
 
+  if (!mesFiltroLote) {
+    const hoje = new Date();
+    mesFiltroLote = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+  }
+
   const abertos = [];
   const concluidos = [];
+  const finalizados = [];
 
   todosRecebimentos.forEach((r) => {
+    if (String(r.data_entrada).slice(0, 7) !== mesFiltroLote) return;
     const progresso = state.progressoRecebimentos.find((p) => p.recebimento_id === r.id);
     const pecas = state.lotes.filter((l) => l.recebimento_id === r.id);
     const { dianteiros, traseiros } = agruparPecasPorTipo(pecas);
 
     const todasPecasDesossadas = pecas.length > 0 && pecas.every(pecaEstaCompleta);
+    const item = { ...r, progresso, pecas, dianteiros, traseiros };
 
-    if (r.status === "finalizado" || todasPecasDesossadas) {
-      concluidos.push({ ...r, progresso, pecas, dianteiros, traseiros });
+    if (r.status === "finalizado") {
+      finalizados.push(item);
+    } else if (todasPecasDesossadas) {
+      concluidos.push(item);
     } else {
-      abertos.push({ ...r, progresso, pecas, dianteiros, traseiros });
+      abertos.push(item);
     }
   });
 
@@ -1168,24 +1179,37 @@ function renderLote() {
     `;
   }
 
+  const listaExibir = (abaLoteAtual === 'abertos' ? abertos : (abaLoteAtual === 'concluidos' ? concluidos : finalizados))
+    .sort((a, b) => new Date(b.data_entrada || b.criado_em) - new Date(a.data_entrada || a.criado_em));
+  const nomeMes = new Date(`${mesFiltroLote}-01T00:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+
   el.innerHTML = sanitizarHTML(`
     <div class="screen lote-screen" style="max-width: 520px; margin: 0 auto; width: 100%;">
       <h2 class="titulo-tela">Escolha a peça em desossa</h2>
       <button class="botao-grande botao-confirmar" id="btn-novo-recebimento" style="margin-bottom:16px;">+ Registrar novo recebimento</button>
       
-      <div class="admin-abas" style="margin-bottom:16px;">
+      <div class="filtro-mes">
+        <button id="mes-lote-anterior" class="botao-secundario" aria-label="Mês anterior">‹</button>
+        <strong class="filtro-mes-nome" aria-live="polite">${nomeMes}</strong>
+        <button id="mes-lote-seguinte" class="botao-secundario" aria-label="Mês seguinte">›</button>
+      </div>
+
+      <div class="admin-abas recebimentos-abas" style="margin-bottom:16px;">
         <button class="aba ${abaLoteAtual === 'abertos' ? 'ativa' : ''}" id="aba-lote-abertos">
           🟢 Em Aberto (${abertos.length})
         </button>
         <button class="aba ${abaLoteAtual === 'concluidos' ? 'ativa' : ''}" id="aba-lote-concluidos">
           ✅ Concluídos (${concluidos.length})
         </button>
+        <button class="aba ${abaLoteAtual === 'finalizados' ? 'ativa' : ''}" id="aba-lote-finalizados">
+          🔒 Finalizados (${finalizados.length})
+        </button>
       </div>
 
       ${state.lotes.some(l => !l.recebimento_id) ? `<section><h3>Peças legadas sem recebimento</h3><p>Vínculos antigos preservados. Não é criado um recebimento fictício.</p>${state.lotes.filter(l => !l.recebimento_id).map(renderItemPeca).join("")}</section>` : ""}
       <div id="lista-recebimentos-conteudo">
-        ${(abaLoteAtual === 'abertos' ? abertos : concluidos).map(renderCardRecebimento).join("") || `
-          <p class="empty-msg">Nenhum recebimento ${abaLoteAtual === 'abertos' ? 'em aberto' : 'concluído'}.</p>
+        ${listaExibir.map(renderCardRecebimento).join("") || `
+          <p class="empty-msg">Nenhum recebimento ${abaLoteAtual === 'abertos' ? 'em aberto' : (abaLoteAtual === 'concluidos' ? 'concluído' : 'finalizado')} neste mês.</p>
         `}
       </div>
     </div>
@@ -1193,6 +1217,9 @@ function renderLote() {
 
   document.getElementById("aba-lote-abertos").addEventListener("click", () => { abaLoteAtual = 'abertos'; renderLote(); });
   document.getElementById("aba-lote-concluidos").addEventListener("click", () => { abaLoteAtual = 'concluidos'; renderLote(); });
+  document.getElementById("aba-lote-finalizados").addEventListener("click", () => { abaLoteAtual = 'finalizados'; renderLote(); });
+  document.getElementById("mes-lote-anterior").addEventListener("click", () => { mesFiltroLote = mesAnterior(mesFiltroLote); renderLote(); });
+  document.getElementById("mes-lote-seguinte").addEventListener("click", () => { mesFiltroLote = mesSeguinte(mesFiltroLote); renderLote(); });
 
   document.getElementById("btn-novo-recebimento").addEventListener("click", () => irPara("novo-recebimento"));
 

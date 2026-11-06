@@ -1,11 +1,11 @@
 // Service worker: busca sempre a versão mais nova primeiro (quando tem internet), e só cai pro
 // que está salvo localmente se estiver offline. Assim, atualizações no app chegam sozinhas — sem
 // precisar de "Unregister + Clear site data" manual toda vez que algo muda.
-const CACHE = "desossa-test-dkiyakjftqcbbnfrgnmh-v4";
+const CACHE = "desossa-test-dkiyakjftqcbbnfrgnmh-v5";
 const ARQUIVOS = [
   "./",
   "./index.html",
-  "./style.css?v=test-3",
+  "./style.css?v=test-4",
   "./runtime-config.js",
   "./tema.js?v=test-3",
   "./tema.css?v=test-3",
@@ -13,7 +13,7 @@ const ARQUIVOS = [
   "./db.js?v=test-2",
   "./sync.js?v=test-2",
   "./scanner.js?v=test-2",
-  "./app.js?v=test-3",
+  "./app.js?v=test-4",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",

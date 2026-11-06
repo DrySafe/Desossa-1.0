@@ -126,6 +126,65 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await page.setViewportSize({width:1280,height:720});
  assert.equal(tentativasLogin,2);
  assert.equal(await page.evaluate(()=>state.usuario.id),uid);
+ // Histórico importado: mês, ordem, conclusão e encerramento são independentes.
+ await page.locator('#bottom-nav [data-route=lote]').click();
+ await page.locator('#mes-lote-anterior').waitFor();
+ const meses=await page.evaluate(()=>{
+  window.__antesHistorico={recebimentos:state.recebimentos,lotes:state.lotes,progresso:state.progressoRecebimentos};
+  const hoje=new Date(),atual=`${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`,anterior=mesAnterior(atual);
+  state.recebimentos=[
+   {id:'aberto-antigo',fornecedor:'Aberto antigo',data_entrada:atual+'-01',status:'aberto'},
+   {id:'aberto-recente',fornecedor:'Aberto recente',data_entrada:atual+'-20',status:'aberto'},
+   {id:'completo',fornecedor:'Desossa concluída',data_entrada:atual+'-10',status:'aberto'},
+   {id:'finalizado',fornecedor:'Encerrado pelo gestor',data_entrada:atual+'-11',status:'finalizado'},
+   {id:'anterior',fornecedor:'Histórico de outro mês',data_entrada:anterior+'-03',status:'aberto'}
+  ];
+  state.lotes=[
+   {id:'peca-aberta',recebimento_id:'aberto-antigo',tipo:'traseiro',numero_peca:1,peso_entrada_kg:100,peso_total_desossado:20},
+   {id:'peca-completa',recebimento_id:'completo',tipo:'traseiro',numero_peca:1,peso_entrada_kg:100,peso_total_desossado:100},
+   {id:'peca-finalizada',recebimento_id:'finalizado',tipo:'traseiro',numero_peca:1,peso_entrada_kg:100,peso_total_desossado:100},
+   {id:'peca-legada',recebimento_id:null,tipo:'dianteiro',numero_peca:77,peso_entrada_kg:50,peso_total_desossado:0}
+  ];
+  state.progressoRecebimentos=[];mesFiltroLote=null;abaLoteAtual='abertos';renderLote();
+  return {atual,anterior};
+ });
+ assert.ok((await page.locator('#aba-lote-abertos').textContent()).includes('(2)'));
+ assert.ok((await page.locator('#aba-lote-concluidos').textContent()).includes('(1)'));
+ assert.ok((await page.locator('#aba-lote-finalizados').textContent()).includes('(1)'));
+ assert.deepEqual((await page.locator('#lista-recebimentos-conteudo .recebimento-fornecedor').allTextContents()).map(t=>t.trim()),['Aberto recente','Aberto antigo']);
+ assert.equal(await page.locator('[data-id=peca-legada]').isVisible(),true);
+ await page.locator('#aba-lote-concluidos').click();
+ assert.equal(await page.locator('#lista-recebimentos-conteudo .recebimento-fornecedor').count(),1);
+ assert.ok((await page.locator('#lista-recebimentos-conteudo').innerText()).includes('Desossa concluída'));
+ assert.equal(await page.locator('[data-add-peca=completo]').isVisible(),true);
+ await page.locator('#aba-lote-finalizados').click();
+ assert.equal(await page.locator('#lista-recebimentos-conteudo .recebimento-fornecedor').count(),1);
+ assert.equal(await page.locator('#lista-recebimentos-conteudo [data-add-peca]').count(),0);
+ assert.equal(await page.locator('#lista-recebimentos-conteudo .lote-item').count(),0);
+ assert.equal(await page.locator('[data-relatorio-recebimento=finalizado]').isVisible(),true);
+ assert.equal(await page.locator('[data-relatorio-desossa=finalizado]').isVisible(),true);
+ await page.locator('#mes-lote-anterior').click();
+ assert.equal(await page.evaluate(()=>mesFiltroLote),meses.anterior);
+ assert.equal(await page.locator('#aba-lote-finalizados').evaluate(e=>e.classList.contains('ativa')),true);
+ assert.ok((await page.locator('#lista-recebimentos-conteudo').innerText()).includes('Nenhum recebimento finalizado neste mês'));
+ await page.locator('#aba-lote-abertos').click();
+ assert.ok((await page.locator('#lista-recebimentos-conteudo').innerText()).includes('Histórico de outro mês'));
+ await page.locator('#mes-lote-seguinte').click();
+ assert.equal(await page.evaluate(()=>mesFiltroLote),meses.atual);
+ assert.equal(await page.evaluate(()=>mesAnterior('2026-01')),'2025-12');
+ assert.equal(await page.evaluate(()=>mesSeguinte('2025-12')),'2026-01');
+ await page.setViewportSize({width:390,height:844});
+ const abasRecebimentos=await page.locator('.recebimentos-abas').boundingBox();
+ assert.ok(abasRecebimentos.x>=0&&abasRecebimentos.x+abasRecebimentos.width<=390);
+ await page.locator('[data-theme-toggle]').click();
+ fs.mkdirSync('test-results',{recursive:true});
+ await page.screenshot({path:'test-results/recebimentos-mes-abas-escuro.png',fullPage:true});
+ await page.locator('[data-theme-toggle]').click();
+ await page.evaluate(()=>{
+  state.recebimentos=window.__antesHistorico.recebimentos;state.lotes=window.__antesHistorico.lotes;state.progressoRecebimentos=window.__antesHistorico.progresso;
+  delete window.__antesHistorico;
+ });
+ await page.setViewportSize({width:1280,height:720});
  // Regressão: salvar, conferir e adicionar peça sem undefined/NaN ou duplicação no retry.
  await page.evaluate(()=>irPara('novo-recebimento'));
  await page.locator('[name=fornecedor]').fill('Fornecedor Cadastro Teste');
@@ -329,6 +388,6 @@ const datasets={colaboradores:[pessoa],cortes_catalogo:[{codigo:'00123',nome:'PA
  await falhaSessao.waitForFunction(()=>document.querySelectorAll('.kpi-card').length===9);
  await falhaSessao.close();
  assert.deepEqual(errors,[]);
- console.log('PASS: login, fila offline/transação/reenvio, backup, CSP, leitura EAN por imagem, câmera simulada/encerramento, relatório, XSS e erro de consulta. Zero conexões externas reais.');
+ console.log('PASS: login, histórico mensal/três abas/ordenação, fila offline/transação/reenvio, backup, CSP, leitura EAN por imagem, câmera simulada/encerramento, relatório, XSS e erro de consulta. Zero conexões externas reais.');
  }finally{liberarLogin();liberarCache();liberarCadastro();liberarConferencia();liberarPeca();liberarConferenciaPeca();await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1});

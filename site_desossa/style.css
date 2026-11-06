@@ -356,6 +356,8 @@ button, input, select { font-family: var(--body); }
   background: var(--panel); font-size: 13px; font-weight: 600; color: var(--ink-soft);
 }
 .aba.ativa { background: var(--meat); color: white; border-color: var(--meat); }
+.recebimentos-abas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.recebimentos-abas .aba { padding: 8px 4px; min-height: 44px; font-size: 12px; }
 .admin-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
 .admin-form input, .admin-form select {
   padding: 14px; border-radius: 12px; border: 1px solid var(--line); font-size: 15px;
